@@ -44,6 +44,13 @@ logTd_range     = [0, 3]
 # params = full set of v, FWHM, tau(x4), Texp(x4) for all gaussians
 
 
+#######
+# Log #
+#######
+
+log = open('log.txt', 'a')
+
+
 
 
 ###############################
@@ -100,7 +107,7 @@ def findranges(data, num_chan = 5): # adds 'interesting_vel' and 'sig_vel_ranges
 					sig_vel_list = np.concatenate((sig_vel_list, [np.median(test_vel)]))
 
 	sig_vel_list = reducelist(sig_vel_list, 1., 5)
-	sig_vel_ranges = [[x[0], x[-1]] for x in sig_vel_list]
+	sig_vel_ranges = [[x[0], x[-1]] for x in sig_vel_list if x[0] != x[-1]]
 	data['sig_vel_ranges'] = sig_vel_ranges
 	return data
 def interestingvel(data = None): # returns interesting_vel
@@ -323,45 +330,58 @@ def placegaussians(data = None, Bayes_threshold = 10): # returns final_p
 	'''
 	mpfit, emcee, decide whether or not to add another gaussian
 	'''
-	accepted_x = []
+	accepted_x_full = []
 	total_num_gauss = 0
+	plot_num = 0
 	for vel_range in data['sig_vel_ranges']:
-		last_accepted_x = []
+		print('vel_range: ' + str(vel_range))
+		last_accepted_x_full = []
 		[min_vel, max_vel] = vel_range
 		modified_data = trimdata(data, min_vel, max_vel)
 
 		num_gauss = 1
 		keep_going = True
 		(null_evidence, _, _) = nullevidence(modified_data)
+		print('null_evidence = ' + str(null_evidence))
 		prev_evidence = null_evidence
-		nwalkers = 16 * num_gauss
 
 		while keep_going == True:
+			nwalkers = 30 * num_gauss
 			p0 = p0gen(	vel_range = vel_range, 
 						num_gauss = num_gauss, 
 						modified_data = modified_data, 
-						accepted_x = accepted_x,
-						last_accepted_x = last_accepted_x, 
+						accepted_x = accepted_x_full,
+						last_accepted_x = last_accepted_x_full, 
 						nwalkers = nwalkers)
+			# print('modified_data input into sampleposterior: ' + str(modified_data))
+			# print('num_gauss input into sampleposterior: ' + str(num_gauss))
+			# print('p0 input into sampleposterior: ' + str(p0))
+			# print('[min_vel, max_vel] input into sampleposterior: ' + str([min_vel, max_vel]))
+			# print('nwalkers input into sampleposterior: ' + str(nwalkers))
 			(x_flat_chain, x_lnprob) = sampleposterior(	modified_data = modified_data, 
 												num_gauss = num_gauss, 
 												p0 = p0, 
-												vel_range = [min_vel, max_vel], 
-												last_accepted_x = last_accepted_x, 
-												accepted_x = accepted_x, 
+												vel_range = [min_vel, max_vel],  
+												accepted_x = accepted_x_full, 
 												nwalkers = nwalkers)
-
-			(current_x, current_evidence) = bestparams(x_flat_chain, x_lnprob)
-			if current_evidence - prev_evidence > Bayes_threshold:
-				last_accepted_x = current_x
-				prev_evidence = current_evidence
-				num_gauss += 1
-				total_num_gauss += 1
+			if len(x_flat_chain) != 0:
+				(current_x_full, current_evidence) = bestparams(x_flat_chain, x_lnprob)
+				plotmodel(data = modified_data, x = [x[1] for x in current_x_full], num_gauss = num_gauss, plot_num = plot_num)
+				plot_num += 1
+				print('evidence for ' + str(num_gauss) + ' = ' + str(current_evidence))
+				if current_evidence - prev_evidence > Bayes_threshold: # working on some tests to refine this
+					last_accepted_x_full = current_x_full
+					prev_evidence = current_evidence
+					num_gauss += 1
+					total_num_gauss += 1
+				else:
+					keep_going = False
 			else:
 				keep_going = False
-		accepted_x = list(itertools.chain(accepted_x, last_accepted_x))
-	final_p = plist(accepted_x, data, total_num_gauss)
-	return final_p
+		accepted_x_full = list(itertools.chain(accepted_x_full, last_accepted_x_full))
+	
+	plotmodel(data = modified_data, x = [x[1] for x in accepted_x_full], num_gauss = total_num_gauss, plot_num = 'Final')
+	return accepted_x_full
 def trimdata(data = None, min_vel = None, max_vel = None): # returns modified_data
 	
 	data_temp = copy.deepcopy(data)
@@ -437,18 +457,18 @@ def nullevidence(modified_data = None): # returns null_evidence
 	(params, evidence) = bestparams(chain = sampler.flatchain, lnprob = sampler.flatlnprobability)
 	# print('params for null: ' + str(params))
 
-	# plt.figure()
-	# plt.plot(modified_data['vel_axis']['1612'], modified_data['tau_spectrum']['1612'], color = 'blue')
-	# plt.plot(modified_data['vel_axis']['1665'], modified_data['tau_spectrum']['1665'], color = 'green')
-	# plt.plot(modified_data['vel_axis']['1667'], modified_data['tau_spectrum']['1667'], color = 'red')
-	# plt.plot(modified_data['vel_axis']['1720'], modified_data['tau_spectrum']['1720'], color = 'cyan')
-	# plt.hlines(params[0][1], np.amin(modified_data['vel_axis']['1612']), np.amax(modified_data['vel_axis']['1612']), color = 'blue')
-	# plt.hlines(params[1][1], np.amin(modified_data['vel_axis']['1612']), np.amax(modified_data['vel_axis']['1612']), color = 'green')
-	# plt.hlines(params[2][1], np.amin(modified_data['vel_axis']['1612']), np.amax(modified_data['vel_axis']['1612']), color = 'red')
-	# plt.hlines(params[3][1], np.amin(modified_data['vel_axis']['1612']), np.amax(modified_data['vel_axis']['1612']), color = 'cyan')
-	# plt.title('Null Model')
-	# plt.savefig('Plots/null_model.pdf')
-	# plt.close()
+	plt.figure()
+	plt.plot(modified_data['vel_axis']['1612'], modified_data['tau_spectrum']['1612'], color = 'blue')
+	plt.plot(modified_data['vel_axis']['1665'], modified_data['tau_spectrum']['1665'], color = 'green')
+	plt.plot(modified_data['vel_axis']['1667'], modified_data['tau_spectrum']['1667'], color = 'red')
+	plt.plot(modified_data['vel_axis']['1720'], modified_data['tau_spectrum']['1720'], color = 'cyan')
+	plt.hlines(params[0][1], np.amin(modified_data['vel_axis']['1612']), np.amax(modified_data['vel_axis']['1612']), color = 'blue')
+	plt.hlines(params[1][1], np.amin(modified_data['vel_axis']['1612']), np.amax(modified_data['vel_axis']['1612']), color = 'green')
+	plt.hlines(params[2][1], np.amin(modified_data['vel_axis']['1612']), np.amax(modified_data['vel_axis']['1612']), color = 'red')
+	plt.hlines(params[3][1], np.amin(modified_data['vel_axis']['1612']), np.amax(modified_data['vel_axis']['1612']), color = 'cyan')
+	plt.title('Null Model')
+	plt.savefig('Plots/null_model.pdf')
+	plt.close()
 	return (evidence, sampler.flatchain, sampler.flatlnprobability)
 def lnprobnull(x = None, modified_data = None): # returns lnprobnull
 	lnprprior = lnprpriornull(yint = x, modified_data = modified_data)
@@ -498,6 +518,11 @@ def bestparams(chain = None, lnprob = None): # returns ([-sig, med, +sig] for al
 	'''
 	Tested and verified 22/3/19
 	'''
+	# print('chain for bestparams:')
+	# for x in chain:
+	# 	print(x)
+	# print('\nlnprob for bestparams:')
+	# print(lnprob)
 	num_steps = len(chain)
 	num_param = len(chain[0])
 
@@ -514,22 +539,41 @@ def bestparams(chain = None, lnprob = None): # returns ([-sig, med, +sig] for al
 		sorted_dparam_chain = [[x for _,x in list(reversed(sorted(zip(sorted_lnprob, dparam_chain))))]] # put back into correct order
 		final_darray = np.concatenate((final_darray, sorted_dparam_chain), axis = 0) # this makes an array with [[lnprob], [dparam1 iterations], etc] all sorted in descending order of lnprob (seems ok)
 
-	contributions_to_evidence = np.zeros(num_steps)
 
-	for step in range(num_steps):
-		for param in range(num_param):
-			contributions_to_evidence[step] += (final_darray[0][step]) + np.log(final_darray[param + 1][step])
+
+
+
+
+
+
+		######
+		# This needs to be fixed
 
 
 	accumulated_evidence = np.zeros(num_steps)
-	step = 0
-
-	for cont in contributions_to_evidence:
-		if step != 0:
-			accumulated_evidence[step] = np.logaddexp(accumulated_evidence[step - 1], cont)
+	for step in range(num_steps):
+		# multiply all dparam values
+		param_volume = 1
+		for param in range(1, len(final_darray)):
+			param_volume *= final_darray[param][step]
+		if param_volume != 0:
+			contribution_to_lnevidence = np.log(param_volume) + final_darray[0][step]
 		else:
-			accumulated_evidence[step] = cont
-		step += 1
+			contribution_to_lnevidence = -np.inf
+		if step == 0:
+			accumulated_evidence[step] = contribution_to_lnevidence
+		else:
+			accumulated_evidence[step] = np.logaddexp(accumulated_evidence[step - 1], contribution_to_lnevidence)
+
+	#############
+
+
+
+
+
+
+
+
 
 	total_evidence = accumulated_evidence[-1]
 	evidence_68 = total_evidence + np.log(0.6825)
@@ -542,17 +586,20 @@ def bestparams(chain = None, lnprob = None): # returns ([-sig, med, +sig] for al
 		results[param][0] = np.amin(final_array[param + 1][:sigma_index + 1])
 		results[param][1] = np.median(final_array[param + 1])
 		results[param][2] = np.amax(final_array[param + 1][:sigma_index + 1])
-
+	# print('results: ' + str(results))
+	# print('total_evidence: ' + str(total_evidence))
 	return (results, total_evidence)
 # initial fit using mpfit
 def p0gen(vel_range = None, num_gauss = None, modified_data = None, accepted_x = [], last_accepted_x = [], nwalkers = None): # returns p0
 	if accepted_x != []:
 		ndim = np.sum([type(a) == bool and a == True for a in modified_data['parameter_list']]) + 1
+		accepted_x = [x[1] for x in accepted_x]
 		accepted_params = molex(x = accepted_x, modified_data = modified_data, num_gauss = int(len(accepted_x) / ndim))
 	else:
 		accepted_params = []
 	if last_accepted_x != []:
 		ndim = np.sum([type(a) == bool and a == True for a in modified_data['parameter_list']]) + 1
+		last_accepted_x = [x[1] for x in last_accepted_x]
 		last_accepted_params = molex(x = last_accepted_x, modified_data = modified_data, num_gauss = int(len(last_accepted_x) / ndim))
 	else:
 		last_accepted_params = []
@@ -562,7 +609,10 @@ def p0gen(vel_range = None, num_gauss = None, modified_data = None, accepted_x =
 		for ind in range(0, len(last_accepted_params), 10):
 			np.append(vel_list, last_accepted_params[ind])
 		vel_list = tuple(vel_list)
-		interesting_vel = [tuple([x]) for x in modified_data['interesting_vel']]
+		if len(modified_data['interesting_vel']) != 0:
+			interesting_vel = [tuple([x]) for x in modified_data['interesting_vel']]
+		else:
+			interesting_vel = np.arange(vel_range[0], vel_range[1], (vel_range[1] - vel_range[0]) / 10.)
 		vel_combos = list(itertools.product([vel_list], interesting_vel))
 		for x in range(len(vel_combos)):
 			vel_combos[x] = [d for e in vel_combos[x] for d in e]
@@ -583,6 +633,13 @@ def p0gen(vel_range = None, num_gauss = None, modified_data = None, accepted_x =
 						{'parname': 'logTdint', 'fixed': False, 'step': 1.e-2, 'limited': [1,1], 'limits': logTdint_range},
 						{'parname': 'logTd', 'fixed': False, 'step': 1.e-2, 'limited': [1,1], 'limits': logTd_range}]
 	
+	range_list = [vel_range, logTgas_range, lognH2_range, logNOH_range, fortho_range, FWHM_range, Av_range, logxOH_range, logxHe_range, logxe_range, logTdint_range, logTd_range]
+	guess_base = [True] + modified_data['parameter_list']
+	guess_base = [np.mean(range_list[a]) if type(guess_base[a]) == bool and guess_base[a] == True else guess_base[a] for a in range(len(guess_base))]
+	guess = guess_base * num_gauss
+
+	np.array([[np.mean(vel_range), np.mean(logTgas_range), np.mean(lognH2_range), np.mean(logNOH_range), np.mean(fortho_range), np.mean(FWHM_range), np.mean(Av_range), np.mean(logxOH_range), np.mean(logxHe_range), np.mean(logxe_range), np.mean(logTdint_range), np.mean(logTd_range)] for b in range(num_gauss)]).flatten()
+	
 	parinfo = standard_parinfo * num_gauss
 	full_param_list = ([True] + modified_data['parameter_list']) * num_gauss
 	[best_p, best_llh] = [[], -np.inf]
@@ -592,10 +649,11 @@ def p0gen(vel_range = None, num_gauss = None, modified_data = None, accepted_x =
 			parinfo[a]['fixed'] = True
 
 	for vel_combo in vel_combos:
-		guess = np.array([[vel_combo[a], 2, 2., 14., 0.75, 2., 0, -7, -1, -4, 0, 0] for a in range(num_gauss)]).flatten() * num_gauss
-		for a in range(len(full_param_list)):
-			if type(full_param_list[a]) != bool:
-				guess[a] = full_param_list[a]
+		for vel_ind in range(len(vel_combo)):
+			guess[int(vel_ind * 12)] = vel_combo[vel_ind]
+		for c in range(len(full_param_list)):
+			if type(full_param_list[c]) != bool:
+				guess[c] = full_param_list[c]
 		fa = {'modified_data': modified_data, 'vel_range': vel_range, 'num_gauss': num_gauss, 'accepted_params': accepted_params}
 		mp = mpfit(mpfitp0, guess, parinfo = parinfo, functkw = fa, maxiter = 1000, quiet = True)
 		fitted_p = mp.params
@@ -609,7 +667,8 @@ def p0gen(vel_range = None, num_gauss = None, modified_data = None, accepted_x =
 	
 	if best_p != []:
 		best_x = xlist(p = best_p, data = modified_data, num_gauss = num_gauss)
-		p0 = [[x * np.random.uniform(0.9, 1.1) for x in best_x] for y in range(nwalkers)]
+		# print('base of p0: ' + str(best_x))
+		p0 = [[x * np.random.uniform(0.999, 1.001) for x in best_x] for y in range(nwalkers)]
 	else:
 		p0_0 = [	np.random.uniform(vel_range[0], vel_range[1]), 
 				np.random.uniform(logTgas_range[0], logTgas_range[1]), 
@@ -624,7 +683,8 @@ def p0gen(vel_range = None, num_gauss = None, modified_data = None, accepted_x =
 				np.random.uniform(logTdint_range[0], logTdint_range[1]), 
 				np.random.uniform(logTd_range[0], logTd_range[1])] * num_gauss
 		p0_0 = [p0_0[a] for a in range(len(p0_0)) if type(full_param_list[a]) == bool and full_param_list[a] == True]
-		p0 = [[a * np.random.uniform(0.9, 1.1) for a in p0_0] for b in range(nwalkers)]
+		# print('base of p0: ' + str(p0_0))
+		p0 = [[a * np.random.uniform(0.999, 1.001) for a in p0_0] for b in range(nwalkers)]
 	return p0
 def molex(p = [], x = None, modified_data = None, num_gauss = None): # returns params
 	if p == []:
@@ -685,6 +745,7 @@ def Texp(tau = None, Tbg = None, Tex = None): # returns Texp
 	Texp = (Tex - Tbg) * (1 - np.exp(-tau))
 	return Texp
 def mpfitp0(p = None, fjac = None, modified_data = None, vel_range = None, num_gauss = None, accepted_params = []): # returns [0, residuals]
+	log.write(str(p) + '\n')
 	params = molex(p = p, modified_data = modified_data, num_gauss = num_gauss)
 	(tau_m_1612, tau_m_1665, tau_m_1667, tau_m_1720, Texp_m_1612, Texp_m_1665, Texp_m_1667, Texp_m_1720) = makemodel(params, modified_data, accepted_params)
 	if modified_data['Texp_spectrum']['1665'] != []:
@@ -749,15 +810,16 @@ def gaussian(mean = None, FWHM = None, height = None, sigma = None, amp = None):
 
 	return lambda x: height * np.exp(-((x - mean)**2.) / (2.*sigma**2.))
 # sample posterior using emcee
-def sampleposterior(modified_data = None, num_gauss = None, p0 = None, vel_range = None, last_accepted_x = None, accepted_x = [], nwalkers = None): # returns (flat_chain, 
+def sampleposterior(modified_data = None, num_gauss = None, p0 = None, vel_range = None, accepted_x = [], nwalkers = None): # returns (flat_chain, 
 	ndim = num_gauss
 	for a in modified_data['parameter_list']:
 		if type(a) == bool and a == True:
 			ndim += num_gauss
 
 	burn_iterations = 30
-	final_iterations = 100
+	final_iterations = 50
 	if accepted_x != []:
+		accepted_x = [x[1] for x in accepted_x]
 		accepted_params = molex(x = accepted_x, modified_data = modified_data, num_gauss = num_gauss)
 	else:
 		accepted_params = []
@@ -780,36 +842,41 @@ def sampleposterior(modified_data = None, num_gauss = None, p0 = None, vel_range
 	# remove steps where lnprob = -np.inf
 	flat_chain = [sampler.flatchain[a] for a in range(len(sampler.flatchain)) if sampler.flatlnprobability[a] != -np.inf]
 	flat_lnprob = [a for a in sampler.flatlnprobability if a != -np.inf]
-
 	return (np.array(flat_chain), np.array(flat_lnprob))
 def lnprob(x = None, modified_data = None, p = [], vel_range = None, num_gauss = None, accepted_params = []): # returns lnprob
+	'''
+	need to add a test of whether or not the velocities are in order
+	'''
 	if p == []:
 		p = plist(x, modified_data, num_gauss)
 	prior = lnprprior(modified_data = modified_data, p = p, vel_range = vel_range, num_gauss = num_gauss)
-	if prior != -np.inf:
-		params = molex(p = p, modified_data = modified_data, num_gauss = num_gauss)
-		models = makemodel(params = params, modified_data = modified_data, accepted_params = accepted_params)
-		(tau_m_1612, tau_m_1665, tau_m_1667, tau_m_1720, Texp_m_1612, Texp_m_1665, Texp_m_1667, Texp_m_1720) = models
-		if modified_data['Texp_spectrum']['1665'] != []:
-			spectra = [	modified_data['tau_spectrum']['1612'], modified_data['tau_spectrum']['1665'], 
-						modified_data['tau_spectrum']['1667'], modified_data['tau_spectrum']['1720'], 
-						modified_data['Texp_spectrum']['1612'], modified_data['Texp_spectrum']['1665'], 
-						modified_data['Texp_spectrum']['1667'], modified_data['Texp_spectrum']['1720']]
-			rms = [		modified_data['tau_rms']['1612'], modified_data['tau_rms']['1665'], 
-						modified_data['tau_rms']['1667'], modified_data['tau_rms']['1720'], 
-						modified_data['Texp_rms']['1612'], modified_data['Texp_rms']['1665'], 
-						modified_data['Texp_rms']['1667'], modified_data['Texp_rms']['1720']]
-		else:
-			spectra = [	modified_data['tau_spectrum']['1612'], modified_data['tau_spectrum']['1665'], 
-						modified_data['tau_spectrum']['1667'], modified_data['tau_spectrum']['1720']]
-			rms = [		modified_data['tau_rms']['1612'], modified_data['tau_rms']['1665'], 
-						modified_data['tau_rms']['1667'], modified_data['tau_rms']['1720']]
-		llh = prior 
-		for a in range(len(spectra)):
-			llh += lnlikelihood(model = models[a], spectrum = spectra[a], spectrum_rms = rms[a])
-		return llh
+	# if prior != -np.inf:
+	params = molex(p = p, modified_data = modified_data, num_gauss = num_gauss)
+	models = makemodel(params = params, modified_data = modified_data, accepted_params = accepted_params)
+	(tau_m_1612, tau_m_1665, tau_m_1667, tau_m_1720, Texp_m_1612, Texp_m_1665, Texp_m_1667, Texp_m_1720) = models
+	if modified_data['Texp_spectrum']['1665'] != []:
+		spectra = [	modified_data['tau_spectrum']['1612'], modified_data['tau_spectrum']['1665'], 
+					modified_data['tau_spectrum']['1667'], modified_data['tau_spectrum']['1720'], 
+					modified_data['Texp_spectrum']['1612'], modified_data['Texp_spectrum']['1665'], 
+					modified_data['Texp_spectrum']['1667'], modified_data['Texp_spectrum']['1720']]
+		rms = [		modified_data['tau_rms']['1612'], modified_data['tau_rms']['1665'], 
+					modified_data['tau_rms']['1667'], modified_data['tau_rms']['1720'], 
+					modified_data['Texp_rms']['1612'], modified_data['Texp_rms']['1665'], 
+					modified_data['Texp_rms']['1667'], modified_data['Texp_rms']['1720']]
 	else:
-		return -np.inf
+		spectra = [	modified_data['tau_spectrum']['1612'], modified_data['tau_spectrum']['1665'], 
+					modified_data['tau_spectrum']['1667'], modified_data['tau_spectrum']['1720']]
+		rms = [		modified_data['tau_rms']['1612'], modified_data['tau_rms']['1665'], 
+					modified_data['tau_rms']['1667'], modified_data['tau_rms']['1720']]
+	llh = prior 
+	for a in range(len(spectra)):
+		llh += lnlikelihood(model = models[a], spectrum = spectra[a], spectrum_rms = rms[a])
+	# if num_gauss > 1:
+	# 	log.write(str(p) + '\t' + str(prior) + '\t' + str(llh - prior) + '\n')
+	# 	log.flush()
+	return llh
+	# else:
+	# 	return -np.inf
 def lnprprior(modified_data = None, p = [], vel_range = None, num_gauss = None): # returns lnprprior
 	parameter_list = [True] + modified_data['parameter_list'] # add velocity
 	lnprprior = 0
@@ -926,8 +993,44 @@ def convergencetest(sampler_chain = None, num_gauss = None, pos = None): # retur
 			return ('Fail', sampler_chain[:,-1,:])
 
 	return ('Pass', sampler_chain[:,-1,:])
+def plotmodel(data = None, x = None, p = [], params = None, accepted_params = [], num_gauss = None, plot_num = None):
+	'''
+	Still needs axis labels!
+	'''
+	if params == None:
+		params = molex(p = p, x = x, modified_data = data, num_gauss = num_gauss)
+	(tau_m_1612, tau_m_1665, tau_m_1667, tau_m_1720, Texp_m_1612, Texp_m_1665, Texp_m_1667, Texp_m_1720) = makemodel(params = params, modified_data = data, accepted_params = accepted_params)
+	fig, axes = plt.subplots(nrows = 5, ncols = 2, sharex = True)
 
+	axes[0,0].plot(data['vel_axis']['1612'], data['tau_spectrum']['1612'], color = 'blue', label = '1612 MHz', linewidth = 1)
+	axes[0,0].plot(data['vel_axis']['1612'], tau_m_1612, color = 'black', linewidth = 1)
+	axes[1,0].plot(data['vel_axis']['1665'], data['tau_spectrum']['1665'], color = 'green', label = '1665 MHz', linewidth = 1)
+	axes[1,0].plot(data['vel_axis']['1665'], tau_m_1665, color = 'black', linewidth = 1)
+	axes[2,0].plot(data['vel_axis']['1667'], data['tau_spectrum']['1667'], color = 'red', label = '1667 MHz', linewidth = 1)
+	axes[2,0].plot(data['vel_axis']['1667'], tau_m_1667, color = 'black', linewidth = 1)
+	axes[3,0].plot(data['vel_axis']['1720'], data['tau_spectrum']['1720'], color = 'cyan', label = '1720 MHz', linewidth = 1)
+	axes[3,0].plot(data['vel_axis']['1720'], tau_m_1720, color = 'black', linewidth = 1)
+	axes[4,0].plot(data['vel_axis']['1612'], data['tau_spectrum']['1612'] - tau_m_1612, color = 'blue', linewidth = 1)
+	axes[4,0].plot(data['vel_axis']['1665'], data['tau_spectrum']['1665'] - tau_m_1665, color = 'green', linewidth = 1)
+	axes[4,0].plot(data['vel_axis']['1667'], data['tau_spectrum']['1667'] - tau_m_1667, color = 'red', linewidth = 1)
+	axes[4,0].plot(data['vel_axis']['1720'], data['tau_spectrum']['1720'] - tau_m_1720, color = 'cyan', linewidth = 1)
+	axes[0,1].plot(data['vel_axis']['1612'], Texp_m_1612, color = 'black', linewidth = 1)
+	axes[1,1].plot(data['vel_axis']['1665'], Texp_m_1665, color = 'black', linewidth = 1)
+	axes[2,1].plot(data['vel_axis']['1667'], Texp_m_1667, color = 'black', linewidth = 1)
+	axes[3,1].plot(data['vel_axis']['1720'], Texp_m_1720, color = 'black', linewidth = 1)
+	if data['Texp_spectrum']['1665'] != []:
+		axes[0,1].plot(data['vel_axis']['1612'], data['Texp_spectrum']['1612'], color = 'blue', label = '1612 MHz', linewidth = 1)
+		axes[1,1].plot(data['vel_axis']['1665'], data['Texp_spectrum']['1665'], color = 'green', label = '1665 MHz', linewidth = 1)
+		axes[2,1].plot(data['vel_axis']['1667'], data['Texp_spectrum']['1667'], color = 'red', label = '1667 MHz', linewidth = 1)
+		axes[3,1].plot(data['vel_axis']['1720'], data['Texp_spectrum']['1720'], color = 'cyan', label = '1720 MHz', linewidth = 1)
+		axes[4,1].plot(data['vel_axis']['1612'], data['Texp_spectrum']['1612'] - Texp_m_1612, color = 'blue', linewidth = 1)
+		axes[4,1].plot(data['vel_axis']['1665'], data['Texp_spectrum']['1665'] - Texp_m_1665, color = 'green', linewidth = 1)
+		axes[4,1].plot(data['vel_axis']['1667'], data['Texp_spectrum']['1667'] - Texp_m_1667, color = 'red', linewidth = 1)
+		axes[4,1].plot(data['vel_axis']['1720'], data['Texp_spectrum']['1720'] - Texp_m_1720, color = 'cyan', linewidth = 1)
 
+	# plt.show()
+	plt.savefig('Plots/' + data['source_name'] + '_plot_' + str(plot_num) + '.pdf')
+	plt.close()
 
 
 #############################
