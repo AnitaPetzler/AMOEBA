@@ -28,7 +28,7 @@ logTgas_range   = [0, 3] # molex struggles below 10K, reduce with caution
 lognH2_range    = [-2, 7]
 logNOH_range    = [11, 16]
 fortho_range    = [0, 1]
-FWHM_range      = [0.1, 10]
+FWHM_range      = [0.1, 15]
 Av_range        = [0, 10]
 logxOH_range    = [-8, -6]
 logxHe_range    = [-2, 0]
@@ -347,6 +347,7 @@ def placegaussians(data = None, Bayes_threshold = 10, use_molex = True, a = None
 		# print('null_evidence = ' + str(null_evidence))
 		prev_evidence = null_evidence
 		evidences = [prev_evidence]
+		print(data['source_name'] + '\t' + str(vel_range) + '\t' + str(null_evidence))
 
 		while keep_going == True:
 			nwalkers = 30 * num_gauss
@@ -471,18 +472,18 @@ def nullevidence(modified_data = None): # returns null_evidence
 	(params, evidence) = bestparams(chain = sampler.chain, lnprob = sampler.lnprobability)
 	# print('params for null: ' + str(params))
 
-	plt.figure()
-	plt.plot(modified_data['vel_axis']['1612'], modified_data['tau_spectrum']['1612'], color = 'blue')
-	plt.plot(modified_data['vel_axis']['1665'], modified_data['tau_spectrum']['1665'], color = 'green')
-	plt.plot(modified_data['vel_axis']['1667'], modified_data['tau_spectrum']['1667'], color = 'red')
-	plt.plot(modified_data['vel_axis']['1720'], modified_data['tau_spectrum']['1720'], color = 'cyan')
-	plt.hlines(params[0][1], np.amin(modified_data['vel_axis']['1612']), np.amax(modified_data['vel_axis']['1612']), color = 'blue')
-	plt.hlines(params[1][1], np.amin(modified_data['vel_axis']['1612']), np.amax(modified_data['vel_axis']['1612']), color = 'green')
-	plt.hlines(params[2][1], np.amin(modified_data['vel_axis']['1612']), np.amax(modified_data['vel_axis']['1612']), color = 'red')
-	plt.hlines(params[3][1], np.amin(modified_data['vel_axis']['1612']), np.amax(modified_data['vel_axis']['1612']), color = 'cyan')
-	plt.title('Null Model')
-	plt.savefig('Plots/null_model.pdf')
-	plt.close()
+	# plt.figure()
+	# plt.plot(modified_data['vel_axis']['1612'], modified_data['tau_spectrum']['1612'], color = 'blue')
+	# plt.plot(modified_data['vel_axis']['1665'], modified_data['tau_spectrum']['1665'], color = 'green')
+	# plt.plot(modified_data['vel_axis']['1667'], modified_data['tau_spectrum']['1667'], color = 'red')
+	# plt.plot(modified_data['vel_axis']['1720'], modified_data['tau_spectrum']['1720'], color = 'cyan')
+	# plt.hlines(params[0][1], np.amin(modified_data['vel_axis']['1612']), np.amax(modified_data['vel_axis']['1612']), color = 'blue')
+	# plt.hlines(params[1][1], np.amin(modified_data['vel_axis']['1612']), np.amax(modified_data['vel_axis']['1612']), color = 'green')
+	# plt.hlines(params[2][1], np.amin(modified_data['vel_axis']['1612']), np.amax(modified_data['vel_axis']['1612']), color = 'red')
+	# plt.hlines(params[3][1], np.amin(modified_data['vel_axis']['1612']), np.amax(modified_data['vel_axis']['1612']), color = 'cyan')
+	# plt.title('Null Model')
+	# plt.savefig('Plots/null_model.pdf')
+	# plt.close()
 	return (evidence, sampler.flatchain, sampler.flatlnprobability)
 def lnprobnull(x = None, modified_data = None): # returns lnprobnull
 	lnprprior = lnprpriornull(yint = x, modified_data = modified_data)
@@ -532,12 +533,9 @@ def bestparams(chain = None, lnprob = None): # returns ([-sig, med, +sig] for al
 	'''
 	Tested and verified 22/3/19
 
-	Add a diagnostic for separating any multimodal chains:
-		- identify outliers in dparam?
 	'''
-	# Step 1: separate out walkers with very different positions
+	# separate out walkers with very different positions
 
-	
 	(grouped_chains, grouped_lnprob) = splitwalkers(chain, lnprob)
 
 	(final_results, final_evidence) = ([], -np.inf)
@@ -591,7 +589,9 @@ def bestparams(chain = None, lnprob = None): # returns ([-sig, med, +sig] for al
 			final_results = results
 			final_evidence = total_evidence
 
-
+	print('Preliminary results:')
+	print(final_results)
+	print('Evidence = ' + str(final_evidence))
 	return (final_results, final_evidence)
 # initial fit using mpfit
 def p0gen(vel_range = None, num_gauss = None, modified_data = None, accepted = [], last_accepted = [], nwalkers = None, use_molex = True): # returns p0
@@ -629,7 +629,7 @@ def p0gen(vel_range = None, num_gauss = None, modified_data = None, accepted = [
 		last_accepted_params = [x[1] for x in last_accepted]
 	
 	# get velocity combos
-	if num_gauss > 2: # i.e. too many to fit every combo
+	if num_gauss > 4: # i.e. too many to fit every combo
 		vel_list = []
 		for ind in range(0, len(last_accepted_params), 10):
 			np.append(vel_list, last_accepted_params[ind])
@@ -882,16 +882,16 @@ def makemodel(params = None, modified_data = None, accepted_params = [], num_gau
 			[vel, FWHM, tau_1612, tau_1665, tau_1667, tau_1720, Texp_1612, Texp_1665, Texp_1667, Texp_1720] = params[comp * num_params:(comp + 1) * num_params]
 		else:
 			[vel, FWHM, tau_1612, tau_1665, tau_1667, tau_1720] = params[comp * num_params:(comp + 1) * num_params]
-		tau_m_1612 += gaussian(mean = vel, FWHM = FWHM, height = tau_1612)(vel_1612)
-		tau_m_1665 += gaussian(mean = vel, FWHM = FWHM, height = tau_1665)(vel_1665)
-		tau_m_1667 += gaussian(mean = vel, FWHM = FWHM, height = tau_1667)(vel_1667)
-		tau_m_1720 += gaussian(mean = vel, FWHM = FWHM, height = tau_1720)(vel_1720)
+		tau_m_1612 += gaussian(mean = vel, FWHM = FWHM, height = tau_1612)(np.array(vel_1612))
+		tau_m_1665 += gaussian(mean = vel, FWHM = FWHM, height = tau_1665)(np.array(vel_1665))
+		tau_m_1667 += gaussian(mean = vel, FWHM = FWHM, height = tau_1667)(np.array(vel_1667))
+		tau_m_1720 += gaussian(mean = vel, FWHM = FWHM, height = tau_1720)(np.array(vel_1720))
 
 		if modified_data['Texp_spectrum']['1665'] != []:
-			Texp_m_1612 += gaussian(mean = vel, FWHM = FWHM, height = Texp_1612)(vel_1612)
-			Texp_m_1665 += gaussian(mean = vel, FWHM = FWHM, height = Texp_1665)(vel_1665)
-			Texp_m_1667 += gaussian(mean = vel, FWHM = FWHM, height = Texp_1667)(vel_1667)
-			Texp_m_1720 += gaussian(mean = vel, FWHM = FWHM, height = Texp_1720)(vel_1720)
+			Texp_m_1612 += gaussian(mean = vel, FWHM = FWHM, height = Texp_1612)(np.array(vel_1612))
+			Texp_m_1665 += gaussian(mean = vel, FWHM = FWHM, height = Texp_1665)(np.array(vel_1665))
+			Texp_m_1667 += gaussian(mean = vel, FWHM = FWHM, height = Texp_1667)(np.array(vel_1667))
+			Texp_m_1720 += gaussian(mean = vel, FWHM = FWHM, height = Texp_1720)(np.array(vel_1720))
 	if modified_data['Texp_spectrum']['1665'] != []:
 		return (tau_m_1612, tau_m_1665, tau_m_1667, tau_m_1720, Texp_m_1612, Texp_m_1665, Texp_m_1667, Texp_m_1720)	
 	else:
@@ -970,8 +970,8 @@ def sampleposterior(modified_data = None, num_gauss = None, p0 = None, vel_range
 	else:
 		accepted_params = [x[1] for x in accepted]
 
-	burn_iterations = 1000
-	final_iterations = 100
+	burn_iterations = 2000
+	final_iterations = 1000
 	
 	args = [modified_data, [], vel_range, num_gauss, accepted_params, use_molex]
 	sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, args = args, a = a)
@@ -1074,8 +1074,8 @@ def lnprprior(modified_data = None, p = [], params = [], vel_range = None, num_g
 				FWHM_prior = lnnaiveprior(value = FWHM, value_range = FWHM_range)
 				(tau_1612_range, tau_1665_range, tau_1667_range, tau_1720_range) = (
 					[-5 * np.abs(np.amin(modified_data['tau_spectrum']['1612'])), 5 * np.abs(np.amax(modified_data['tau_spectrum']['1612']))], 
-					[-5 * np.abs(np.amin(modified_data['tau_spectrum']['1665'])), 5 * np.abs(np.amax(modified_data['tau_spectrum']['1665']))], 
-					[-5 * np.abs(np.amin(modified_data['tau_spectrum']['1667'])), 5 * np.abs(np.amax(modified_data['tau_spectrum']['1667']))], 
+					[-1.5 * np.abs(np.amin(modified_data['tau_spectrum']['1665'])), 1.5 * np.abs(np.amax(modified_data['tau_spectrum']['1665']))], 
+					[-1.5 * np.abs(np.amin(modified_data['tau_spectrum']['1667'])), 1.5 * np.abs(np.amax(modified_data['tau_spectrum']['1667']))], 
 					[-5 * np.abs(np.amin(modified_data['tau_spectrum']['1720'])), 5 * np.abs(np.amax(modified_data['tau_spectrum']['1720']))])
 				tau_1612_prior = lnnaiveprior(value = tau_1612, value_range = tau_1612_range)
 				tau_1665_prior = lnnaiveprior(value = tau_1665, value_range = tau_1665_range)
@@ -1086,8 +1086,8 @@ def lnprprior(modified_data = None, p = [], params = [], vel_range = None, num_g
 				if modified_data['Texp_spectrum']['1665'] != []:
 					(Texp_1612_range, Texp_1665_range, Texp_1667_range, Texp_1720_range) = (
 						[-5 * np.abs(np.amin(modified_data['Texp_spectrum']['1612'])), 5 * np.abs(np.amax(modified_data['Texp_spectrum']['1612']))], 
-						[-5 * np.abs(np.amin(modified_data['Texp_spectrum']['1665'])), 5 * np.abs(np.amax(modified_data['Texp_spectrum']['1665']))], 
-						[-5 * np.abs(np.amin(modified_data['Texp_spectrum']['1667'])), 5 * np.abs(np.amax(modified_data['Texp_spectrum']['1667']))], 
+						[-1.5 * np.abs(np.amin(modified_data['Texp_spectrum']['1665'])), 1.5 * np.abs(np.amax(modified_data['Texp_spectrum']['1665']))], 
+						[-1.5 * np.abs(np.amin(modified_data['Texp_spectrum']['1667'])), 1.5 * np.abs(np.amax(modified_data['Texp_spectrum']['1667']))], 
 						[-5 * np.abs(np.amin(modified_data['Texp_spectrum']['1720'])), 5 * np.abs(np.amax(modified_data['Texp_spectrum']['1720']))]) 
 					Texp_1612_prior = lnnaiveprior(value = Texp_1612, value_range = Texp_1612_range)
 					Texp_1665_prior = lnnaiveprior(value = Texp_1665, value_range = Texp_1665_range)
@@ -1234,7 +1234,264 @@ def lnpriortausum(params = None, num_gauss = None, modified_data = None): # retu
 		tau_sum_rms = np.sqrt((tau_rms_1665/5.)**2. + (tau_rms_1667/9.)**2. + (tau_rms_1612)**2. + (tau_rms_1720)**2.)
 		lnprior += -np.log(tau_sum_rms * np.sqrt(2.*math.pi)) - (tau_sum**2) / (2.*tau_sum_rms**2)
 	return lnprior
+# reports
+def resultsreport(final_parameters = None, final_median_parameters = None, data = None, file_preamble = None):
+	'''
+	Generates a nice report of results
+	'''
 
+	short_source_name_dict = {'g003.74+0.64.':'g003', 
+			'g006.32+1.97.':'g006', 
+			'g007.47+0.06.':'g007', 
+			'g334.72-0.65.':'g334', 
+			'g336.49-1.48.':'g336', 
+			'g340.79-1.02a.':'g340a', 
+			'g340.79-1.02b.':'g340b', 
+			'g344.43+0.05.':'g344', 
+			'g346.52+0.08.':'g346', 
+			'g347.75-1.14.':'g347', 
+			'g348.44+2.08.':'g348', 
+			'g349.73+1.67.':'g349', 
+			'g350.50+0.96.':'g350', 
+			'g351.61+0.17a.':'g351a', 
+			'g351.61+0.17b.':'g351b', 
+			'g353.411-0.3.':'g353', 
+			'g356.91+0.08.':'g356'}
+
+	try:
+		os.makedir('pickles')
+	except:
+		pass
+
+	pickle.dump(final_parameters, open('pickles/RESULTS_' + str(file_preamble) + '_' + short_source_name_dict[data['source_name']] + '.pickle', 'w'))
+	
+	PlotFinalModel(final_parameters = final_parameters, data = data, file_preamble = file_preamble)
+	print('\nResults for ' + data['source_name'])
+	
+	if data['Texp_spectrum']['1665'] != []:
+		print('\tNumber of features identified: ' + str(len(final_parameters) / 10) + '\n')
+	else:
+		print('\tNumber of features identified: ' + str(len(final_parameters) / 6) + '\n'	)
+
+	if len(final_parameters) > 5:
+
+		print('\tBackground Temperatures [1612, 1665, 1667, 1720MHz] = ' + str([data['Tbg']['1612'], data['Tbg']['1665'], data['Tbg']['1667'], data['Tbg']['1720']]))
+		final_parameters = final_parameters
+		print('\tFeature Parameters [16th, 50th, 84th quantiles]:')
+		
+		if data['Texp_spectrum']['1665'] != []:
+			for feature in range(int(len(final_parameters) / 10)):
+				print('\t\tfeature number ' + str(feature + 1) + ':')
+				[[vel_16, vel_50, vel_84], [fwhm_16, fwhm_50, fwhm_84], [tau_1612_16, tau_1612_50, tau_1612_84], [tau_1665_16, tau_1665_50, tau_1665_84], [tau_1667_16, tau_1667_50, tau_1667_84], [tau_1720_16, tau_1720_50, tau_1720_84], [Texp_1612_16, Texp_1612_50, Texp_1612_84], [Texp_1665_16, Texp_1665_50, Texp_1665_84], [Texp_1667_16, Texp_1667_50, Texp_1667_84], [Texp_1720_16, Texp_1720_50, Texp_1720_84]] = final_parameters[feature * 10:feature * 10 + 10]
+
+				print('\t\t\tcentroid velocity = ' + str([vel_16, vel_50, vel_84]) + ' km/sec')
+				print('\t\t\tfwhm = ' + str([fwhm_16, fwhm_50, fwhm_84]) + ' km/sec')
+				print('\n\t\t\t1612MHz peak tau = ' + str([tau_1612_16, tau_1612_50, tau_1612_84]))
+				print('\t\t\t1665MHz peak tau = ' + str([tau_1665_16, tau_1665_50, tau_1665_84]))
+				print('\t\t\t1667MHz peak tau = ' + str([tau_1667_16, tau_1667_50, tau_1667_84]))
+				print('\t\t\t1720MHz peak tau = ' + str([tau_1720_16, tau_1720_50, tau_1720_84]))
+				print('\n\t\t\t1612MHz Texp = ' + str([Texp_1612_16, Texp_1612_50, Texp_1612_84]) + ' K')
+				print('\t\t\t1665MHz Texp = ' + str([Texp_1665_16, Texp_1665_50, Texp_1665_84]) + ' K')
+				print('\t\t\t1667MHz Texp = ' + str([Texp_1667_16, Texp_1667_50, Texp_1667_84]) + ' K')
+				print('\t\t\t1720MHz Texp = ' + str([Texp_1720_16, Texp_1720_50, Texp_1720_84]) + ' K')
+
+		else:
+			for feature in range(int(len(final_parameters) / 6)):
+				print('\t\tfeature number ' + str(feature + 1) + ':')
+				[[vel_16, vel_50, vel_84], [fwhm_16, fwhm_50, fwhm_84], [tau_1612_16, tau_1612_50, tau_1612_84], [tau_1665_16, tau_1665_50, tau_1665_84], [tau_1667_16, tau_1667_50, tau_1667_84], [tau_1720_16, tau_1720_50, tau_1720_84]] = final_parameters[feature * 6:feature * 6 + 6]
+
+				print('\t\t\tcentroid velocity = ' + str([vel_16, vel_50, vel_84]) + ' km/sec')
+				print('\t\t\tfwhm = ' + str([fwhm_16, fwhm_50, fwhm_84]) + ' km/sec')
+				print('\n\t\t\t1612MHz peak tau = ' + str([tau_1612_16, tau_1612_50, tau_1612_84]))
+				print('\t\t\t1665MHz peak tau = ' + str([tau_1665_16, tau_1665_50, tau_1665_84]))
+				print('\t\t\t1667MHz peak tau = ' + str([tau_1667_16, tau_1667_50, tau_1667_84]))
+				print('\t\t\t1720MHz peak tau = ' + str([tau_1720_16, tau_1720_50, tau_1720_84]))
+def resultstable(final_parameters = None, data = None):
+	'''
+	make a latex table
+	'''
+
+	if len(final_parameters) > 5:
+		if data['Texp_spectrum']['1665'] != []:
+			for feature in range(int(len(final_parameters) / 10)):
+				[[vel_16, vel_50, vel_84], [fwhm_16, fwhm_50, fwhm_84], [tau_1612_16, tau_1612_50, tau_1612_84], [tau_1665_16, tau_1665_50, tau_1665_84], [tau_1667_16, tau_1667_50, tau_1667_84], [tau_1720_16, tau_1720_50, tau_1720_84], [Texp_1612_16, Texp_1612_50, Texp_1612_84], [Texp_1665_16, Texp_1665_50, Texp_1665_84], [Texp_1667_16, Texp_1667_50, Texp_1667_84], [Texp_1720_16, Texp_1720_50, Texp_1720_84]] = final_parameters[feature * 10:feature * 10 + 10]
+				[vel_16, vel_50, vel_84] = [round(x, 1) for x in [vel_16, vel_50, vel_84]]
+				[fwhm_16, fwhm_50, fwhm_84] = [round(x, 2) for x in [fwhm_16, fwhm_50, fwhm_84]]
+				[tau_1612_16, tau_1612_50, tau_1612_84, tau_1665_16, tau_1665_50, tau_1665_84, tau_1667_16, tau_1667_50, tau_1667_84, tau_1720_16, tau_1720_50, tau_1720_84, Texp_1612_16, Texp_1612_50, Texp_1612_84, Texp_1665_16, Texp_1665_50, Texp_1665_84, Texp_1667_16, Texp_1667_50, Texp_1667_84, Texp_1720_16, Texp_1720_50, Texp_1720_84] = [round(x, 3) for x in [tau_1612_16, tau_1612_50, tau_1612_84, tau_1665_16, tau_1665_50, tau_1665_84, tau_1667_16, tau_1667_50, tau_1667_84, tau_1720_16, tau_1720_50, tau_1720_84, Texp_1612_16, Texp_1612_50, Texp_1612_84, Texp_1665_16, Texp_1665_50, Texp_1665_84, Texp_1667_16, Texp_1667_50, Texp_1667_84, Texp_1720_16, Texp_1720_50, Texp_1720_84]]
+				print(data['source_name'] + '&' + str(vel_50) + '$^{+' + str(np.abs(vel_84 - vel_50)) + '}_{-' + str(np.abs(vel_50 - vel_16)) + '}$' + '&' + 
+						str(fwhm_50) + '$^{+' + str(np.abs(fwhm_84 - fwhm_50)) + '}_{-' + str(np.abs(fwhm_50 - fwhm_16)) + '}$' + '&' + 
+						str(tau_1612_50) + '$^{+' + str(np.abs(tau_1612_84 - tau_1612_50)) + '}_{-' + str(np.abs(tau_1612_50 - tau_1612_16)) + '}$' + '&' + 
+						str(tau_1665_50) + '$^{+' + str(np.abs(tau_1665_84 - tau_1665_50)) + '}_{-' + str(np.abs(tau_1665_50 - tau_1665_16)) + '}$' + '&' + 
+						str(tau_1667_50) + '$^{+' + str(np.abs(tau_1667_84 - tau_1667_50)) + '}_{-' + str(np.abs(tau_1667_50 - tau_1667_16)) + '}$' + '&' + 
+						str(tau_1720_50) + '$^{+' + str(np.abs(tau_1720_84 - tau_1720_50)) + '}_{-' + str(np.abs(tau_1720_50 - tau_1720_16)) + '}$' + '&' + 
+						str(Texp_1612_50) + '$^{+' + str(np.abs(Texp_1612_84 - Texp_1612_50)) + '}_{-' + str(np.abs(Texp_1612_50 - Texp_1612_16)) + '}$' + '&' + 
+						str(Texp_1665_50) + '$^{+' + str(np.abs(Texp_1665_84 - Texp_1665_50)) + '}_{-' + str(np.abs(Texp_1665_50 - Texp_1665_16)) + '}$' + '&' + 
+						str(Texp_1667_50) + '$^{+' + str(np.abs(Texp_1667_84 - Texp_1667_50)) + '}_{-' + str(np.abs(Texp_1667_50 - Texp_1667_16)) + '}$' + '&' + 
+						str(Texp_1720_50) + '$^{+' + str(np.abs(Texp_1720_84 - Texp_1720_50)) + '}_{-' + str(np.abs(Texp_1720_50 - Texp_1720_16)) + '}$' + '\\\\')
+
+		else:
+			for feature in range(int(len(final_parameters) / 6)):
+				[[vel_16, vel_50, vel_84], [fwhm_16, fwhm_50, fwhm_84], [tau_1612_16, tau_1612_50, tau_1612_84], [tau_1665_16, tau_1665_50, tau_1665_84], [tau_1667_16, tau_1667_50, tau_1667_84], [tau_1720_16, tau_1720_50, tau_1720_84]] = final_parameters[feature * 6:feature * 6 + 6]
+				[[tau_1612_16, tau_1612_50, tau_1612_84], [tau_1665_16, tau_1665_50, tau_1665_84], [tau_1667_16, tau_1667_50, tau_1667_84], [tau_1720_16, tau_1720_50, tau_1720_84]] = [[tau_1612_16*1000, tau_1612_50*1000, tau_1612_84*1000], [tau_1665_16*1000, tau_1665_50*1000, tau_1665_84*1000], [tau_1667_16*1000, tau_1667_50*1000, tau_1667_84*1000], [tau_1720_16*1000, tau_1720_50*1000, tau_1720_84*1000]]
+				[velm, velp] = [vel_50 - vel_16, vel_84 - vel_50]
+				[fwhmm, fwhmp] = [fwhm_50 - fwhm_16, fwhm_84 - fwhm_50]
+				[tau_1612m, tau_1612p] = [tau_1612_50 - tau_1612_16, tau_1612_84 - tau_1612_50]
+				[tau_1665m, tau_1665p] = [tau_1665_50 - tau_1665_16, tau_1665_84 - tau_1665_50]
+				[tau_1667m, tau_1667p] = [tau_1667_50 - tau_1667_16, tau_1667_84 - tau_1667_50]
+				[tau_1720m, tau_1720p] = [tau_1720_50 - tau_1720_16, tau_1720_84 - tau_1720_50]
+				[velm, vel_50, velp] = [round(x, 1) for x in [velm, vel_50, velp]]
+				[fwhmm, fwhm_50, fwhmp] = [round(x, 2) for x in [fwhmm, fwhm_50, fwhmp]]
+				[tau_1612m, tau_1612_50, tau_1612p, tau_1665m, tau_1665_50, tau_1665p, tau_1667m, tau_1667_50, tau_1667p, tau_1720m, tau_1720_50, tau_1720p] = [round(x, 0) for x in [tau_1612m, tau_1612_50, tau_1612p, tau_1665m, tau_1665_50, tau_1665p, tau_1667m, tau_1667_50, tau_1667p, tau_1720m, tau_1720_50, tau_1720p]]
+				print(data['source_name'] + '&' + 
+					str(vel_50) + '$^{+' + str(np.abs(velp)) + '}_{-' + str(np.abs(velm)) + '}$' + '&' + 
+					str(fwhm_50) + '$^{+' + str(np.abs(fwhmp)) + '}_{-' + str(np.abs(fwhmm)) + '}$' + '&' + 
+					str(tau_1612_50) + '$^{+' + str(np.abs(tau_1612p)) + '}_{-' + str(np.abs(tau_1612m)) + '}$' + '&' + 
+					str(tau_1665_50) + '$^{+' + str(np.abs(tau_1665p)) + '}_{-' + str(np.abs(tau_1665m)) + '}$' + '&' + 
+					str(tau_1667_50) + '$^{+' + str(np.abs(tau_1667p)) + '}_{-' + str(np.abs(tau_1667m)) + '}$' + '&' + 
+					str(tau_1720_50) + '$^{+' + str(np.abs(tau_1720p)) + '}_{-' + str(np.abs(tau_1720m)) + '}$' + '\\\\')
+def resultstableexcel(final_parameters = None, final_median_parameters = None, data = None):
+	'''
+	make an excel table
+	'''
+
+	if len(final_parameters) > 5:
+
+		final_parameters = final_parameters
+		
+		if data['Texp_spectrum']['1665'] != []:
+			for feature in range(int(len(final_parameters) / 10)):
+				[[vel_16, vel_50, vel_84], [fwhm_16, fwhm_50, fwhm_84], [tau_1612_16, tau_1612_50, tau_1612_84], [tau_1665_16, tau_1665_50, tau_1665_84], [tau_1667_16, tau_1667_50, tau_1667_84], [tau_1720_16, tau_1720_50, tau_1720_84], [Texp_1612_16, Texp_1612_50, Texp_1612_84], [Texp_1665_16, Texp_1665_50, Texp_1665_84], [Texp_1667_16, Texp_1667_50, Texp_1667_84], [Texp_1720_16, Texp_1720_50, Texp_1720_84]] = final_parameters[feature * 10:feature * 10 + 10]
+				print(data['source_name'] + ' \t ' + str(vel_50) + ' \t ' + str(vel_84 - vel_50) + ' \t ' + str(vel_50 - vel_16) + ' \t ' + str(fwhm_50) + ' \t ' + str(fwhm_84 - fwhm_50) + ' \t ' + str(fwhm_50 - fwhm_16) + ' \t ' + str(tau_1612_50) + ' \t ' + str(tau_1612_84 - tau_1612_50) + ' \t ' + str(tau_1612_50 - tau_1612_16) + ' \t ' + str(tau_1665_50) + ' \t ' + str(tau_1665_84 - tau_1665_50) + ' \t ' + str(tau_1665_50 - tau_1665_16) + ' \t ' + str(tau_1667_50) + ' \t ' + str(tau_1667_84 - tau_1667_50) + ' \t ' + str(tau_1667_50 - tau_1667_16) + ' \t ' + str(tau_1720_50) + ' \t ' + str(tau_1720_84 - tau_1720_50) + ' \t ' + str(tau_1720_50 - tau_1720_16) + ' \t ' + str(Texp_1612_50) + ' \t ' + str(Texp_1612_84 - Texp_1612_50) + ' \t ' + str(Texp_1612_50 - Texp_1612_16) + ' \t ' + str(Texp_1665_50) + ' \t ' + str(Texp_1665_84 - Texp_1665_50) + ' \t ' + str(Texp_1665_50 - Texp_1665_16) + ' \t ' + str(Texp_1667_50) + ' \t ' + str(Texp_1667_84 - Texp_1667_50) + ' \t ' + str(Texp_1667_50 - Texp_1667_16) + ' \t ' + str(Texp_1720_50) + ' \t ' + str(Texp_1720_84 - Texp_1720_50) + ' \t ' + str(Texp_1720_50 - Texp_1720_16))
+
+		else:
+			for feature in range(int(len(final_parameters) / 6)):
+				[[vel_16, vel_50, vel_84], [fwhm_16, fwhm_50, fwhm_84], [tau_1612_16, tau_1612_50, tau_1612_84], [tau_1665_16, tau_1665_50, tau_1665_84], [tau_1667_16, tau_1667_50, tau_1667_84], [tau_1720_16, tau_1720_50, tau_1720_84]] = final_parameters[feature * 6:feature * 6 + 6]
+				print(data['source_name'] + ' \t ' + str(vel_50) + ' \t ' + str(vel_84 - vel_50) + ' \t ' + str(vel_50 - vel_16) + ' \t ' + str(fwhm_50) + ' \t ' + str(fwhm_84 - fwhm_50) + ' \t ' + str(fwhm_50 - fwhm_16) + ' \t ' + str(tau_1612_50) + ' \t ' + str(tau_1612_84 - tau_1612_50) + ' \t ' + str(tau_1612_50 - tau_1612_16) + ' \t ' + str(tau_1665_50) + ' \t ' + str(tau_1665_84 - tau_1665_50) + ' \t ' + str(tau_1665_50 - tau_1665_16) + ' \t ' + str(tau_1667_50) + ' \t ' + str(tau_1667_84 - tau_1667_50) + ' \t ' + str(tau_1667_50 - tau_1667_16) + ' \t ' + str(tau_1720_50) + ' \t ' + str(tau_1720_84 - tau_1720_50) + ' \t ' + str(tau_1720_50 - tau_1720_16))
+def plotfinalmodel(final_parameters = None, data = None, file_preamble = None):
+	'''
+	final_parameters is an Xx3 array, axis 1 has the 0.16, 0.50 and 0.84 quantiles from the posterior distribution, which approximate +/- 1 sigma
+
+	THIS ONLY WORKS FOR NON-MOLEX!!
+	'''
+
+	parameters_16 = [x[0] for x in final_parameters]
+	parameters_50 = [x[1] for x in final_parameters]
+	parameters_84 = [x[2] for x in final_parameters]
+
+
+
+	source_name = data['source_name']
+
+	vel_1612 = data['vel_axis']['1612']
+	vel_1665 = data['vel_axis']['1665']
+	vel_1667 = data['vel_axis']['1667']
+	vel_1720 = data['vel_axis']['1720']
+
+	tau_1612 = data['tau_spectrum']['1612']
+	tau_1665 = data['tau_spectrum']['1665']
+	tau_1667 = data['tau_spectrum']['1667']
+	tau_1720 = data['tau_spectrum']['1720']
+	
+	if data['Texp_spectrum']['1665'] != []:
+		Texp_1612 = data['Texp_spectrum']['1612']
+		Texp_1665 = data['Texp_spectrum']['1665']
+		Texp_1667 = data['Texp_spectrum']['1667']
+		Texp_1720 = data['Texp_spectrum']['1720']
+		num_gauss = len(parameters_50)/10
+		
+		(tau_model_1612_min, tau_model_1665_min, tau_model_1667_min, tau_model_1720_min, Texp_model_1612_min, Texp_model_1665_min, Texp_model_1667_min, Texp_model_1720_min) = makemodel(params = parameters_16, modified_data = data, num_gauss = num_gauss)
+		(tau_model_1612, tau_model_1665, tau_model_1667, tau_model_1720, Texp_model_1612, Texp_model_1665, Texp_model_1667, Texp_model_1720) = makemodel(params = parameters_50, modified_data = data, num_gauss = num_gauss)
+		(tau_model_1612_max, tau_model_1665_max, tau_model_1667_max, tau_model_1720_max, Texp_model_1612_max, Texp_model_1665_max, Texp_model_1667_max, Texp_model_1720_max) = makemodel(params = parameters_84, modified_data = data, num_gauss = num_gauss)
+
+		fig, axes = plt.subplots(nrows = 5, ncols = 2, sharex = True)
+		# tau
+		axes[0,0].plot(vel_1612, tau_1612, color = 'blue', label = '1612 MHz', linewidth = 1)
+		axes[0,0].plot(vel_1612, tau_model_1612, color = 'black', linewidth = 1)
+		axes[0,0].fill_between(vel_1612, tau_model_1612_min, tau_model_1612_max, color='0.7', zorder=-1)
+		axes[1,0].plot(vel_1665, tau_1665, color = 'green', label = '1665 MHz', linewidth = 1)
+		axes[1,0].plot(vel_1665, tau_model_1665, color = 'black', linewidth = 1)
+		axes[1,0].fill_between(vel_1665, tau_model_1665_min, tau_model_1665_max, color='0.7', zorder=-1)
+		axes[2,0].plot(vel_1667, tau_1667, color = 'red', label = '1667 MHz', linewidth = 1)
+		axes[2,0].plot(vel_1667, tau_model_1667, color = 'black', linewidth = 1)
+		axes[2,0].fill_between(vel_1667, tau_model_1667_min, tau_model_1667_max, color='0.7', zorder=-1)
+		axes[3,0].plot(vel_1720, tau_1720, color = 'cyan', label = '1720 MHz', linewidth = 1)
+		axes[3,0].plot(vel_1720, tau_model_1720, color = 'black', linewidth = 1)
+		axes[3,0].fill_between(vel_1720, tau_model_1720_min, tau_model_1720_max, color='0.7', zorder=-1)
+		# tau residuals
+		axes[4,0].plot(vel_1612, tau_1612 - tau_model_1612, color = 'blue', linewidth = 1)
+		axes[4,0].plot(vel_1665, tau_1665 - tau_model_1665, color = 'green', linewidth = 1)
+		axes[4,0].plot(vel_1667, tau_1667 - tau_model_1667, color = 'red', linewidth = 1)
+		axes[4,0].plot(vel_1720, tau_1720 - tau_model_1720, color = 'cyan', linewidth = 1)
+		# Texp
+		axes[0,1].plot(vel_1612, Texp_1612, color = 'blue', label = '1612 MHz', linewidth = 1)
+		axes[0,1].plot(vel_1612, Texp_model_1612, color = 'black', linewidth = 1)
+		axes[0,1].fill_between(vel_1612, Texp_model_1612_min, Texp_model_1612_max, color='0.7', zorder=-1)
+		axes[1,1].plot(vel_1665, Texp_1665, color = 'green', label = '1665 MHz', linewidth = 1)
+		axes[1,1].plot(vel_1665, Texp_model_1665, color = 'black', linewidth = 1)
+		axes[1,1].fill_between(vel_1665, Texp_model_1665_min, Texp_model_1665_max, color='0.7', zorder=-1)
+		axes[2,1].plot(vel_1667, Texp_1667, color = 'red', label = '1667 MHz', linewidth = 1)
+		axes[2,1].plot(vel_1667, Texp_model_1667, color = 'black', linewidth = 1)
+		axes[2,1].fill_between(vel_1667, Texp_model_1667_min, Texp_model_1667_max, color='0.7', zorder=-1)
+		axes[3,1].plot(vel_1720, Texp_1720, color = 'cyan', label = '1720 MHz', linewidth = 1)
+		axes[3,1].plot(vel_1720, Texp_model_1720, color = 'black', linewidth = 1)
+		axes[3,1].fill_between(vel_1720, Texp_model_1720_min, Texp_model_1720_max, color='0.7', zorder=-1)
+		# Texp residuals
+		axes[4,1].plot(vel_1612, Texp_1612 - Texp_model_1612, color = 'blue', linewidth = 1)
+		axes[4,1].plot(vel_1665, Texp_1665 - Texp_model_1665, color = 'green', linewidth = 1)
+		axes[4,1].plot(vel_1667, Texp_1667 - Texp_model_1667, color = 'red', linewidth = 1)
+		axes[4,1].plot(vel_1720, Texp_1720 - Texp_model_1720, color = 'cyan', linewidth = 1)
+
+		for row in range(5):
+			for col in range(2):
+				if any([axes[row, col].get_yticks()[::2][x] == 0. for x in axes[row, col].get_yticks()[::2]]):
+					axes[row, col].set_yticks(axes[row, col].get_yticks()[::2])
+				else:
+					axes[row, col].set_yticks(axes[row, col].get_yticks()[1::2])
+
+	else:
+		num_gauss = len(parameters_50)/6
+		(tau_model_1612_min, tau_model_1665_min, tau_model_1667_min, tau_model_1720_min) = makemodel(params = parameters_16, modified_data = data, num_gauss = num_gauss)
+		(tau_model_1612, tau_model_1665, tau_model_1667, tau_model_1720) = makemodel(params = parameters_50, modified_data = data, num_gauss = num_gauss)
+		(tau_model_1612_max, tau_model_1665_max, tau_model_1667_max, tau_model_1720_max) = makemodel(params = parameters_84, modified_data = data, num_gauss = num_gauss)
+		fig, axes = plt.subplots(nrows = 5, ncols = 1, sharex = True)
+		# tau
+		axes[0].plot(vel_1612, tau_1612, color = 'blue', label = '1612 MHz', linewidth = 1)
+		axes[0].plot(vel_1612, tau_model_1612, color = 'black', linewidth = 1)
+		axes[0].fill_between(vel_1612, tau_model_1612_min, tau_model_1612_max, color='0.7', zorder=-1)
+		axes[1].plot(vel_1665, tau_1665, color = 'green', label = '1665 MHz', linewidth = 1)
+		axes[1].plot(vel_1665, tau_model_1665, color = 'black', linewidth = 1)
+		axes[1].fill_between(vel_1665, tau_model_1665_min, tau_model_1665_max, color='0.7', zorder=-1)
+		axes[2].plot(vel_1667, tau_1667, color = 'red', label = '1667 MHz', linewidth = 1)
+		axes[2].plot(vel_1667, tau_model_1667, color = 'black', linewidth = 1)
+		axes[2].fill_between(vel_1667, tau_model_1667_min, tau_model_1667_max, color='0.7', zorder=-1)
+		axes[3].plot(vel_1720, tau_1720, color = 'cyan', label = '1720 MHz', linewidth = 1)
+		axes[3].plot(vel_1720, tau_model_1720, color = 'black', linewidth = 1)
+		axes[3].fill_between(vel_1720, tau_model_1720_min, tau_model_1720_max, color='0.7', zorder=-1)
+		# tau residuals
+		axes[4].plot(vel_1612, tau_1612 - tau_model_1612, color = 'blue', linewidth = 1)
+		axes[4].plot(vel_1665, tau_1665 - tau_model_1665, color = 'green', linewidth = 1)
+		axes[4].plot(vel_1667, tau_1667 - tau_model_1667, color = 'red', linewidth = 1)
+		axes[4].plot(vel_1720, tau_1720 - tau_model_1720, color = 'cyan', linewidth = 1)
+		# labels
+		axes[4].set_xlabel('Velocity (km/s)')
+		axes[2].set_ylabel('Optical Depth', labelpad = 15)
+		axes[0].set_title(source_name)
+		axes[0].text(0.01, 0.75, '1612 MHz', transform=axes[0].transAxes)
+		axes[1].text(0.01, 0.75, '1665 MHz', transform=axes[1].transAxes)
+		axes[2].text(0.01, 0.75, '1667 MHz', transform=axes[2].transAxes)
+		axes[3].text(0.01, 0.75, '1720 MHz', transform=axes[3].transAxes)
+		axes[4].text(0.01, 0.75, 'Residuals', transform=axes[4].transAxes)
+		
+		for row in range(5):
+			if any([axes[row].get_yticks()[::2][x] == 0. for x in axes[row].get_yticks()[::2]]):
+				axes[row].set_yticks(axes[row].get_yticks()[::2])
+			else:
+				axes[row].set_yticks(axes[row].get_yticks()[1::2])
+
+	
+	plt.savefig(str(file_preamble) + '_' + source_name + '_Final_model.pdf')
+	# plt.show()
+	plt.close()
 
 #############################
 #                           #
