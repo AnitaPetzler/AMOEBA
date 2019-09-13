@@ -63,7 +63,7 @@ logTd_range     = [0., 3.]
 def findranges(data, num_chan = 1, sigma_tolerance = 1.5): # adds 'interesting_vel' and 'sig_vel_ranges' to dictionary
 	# Makes sure that any 'interesting velocities' are included in the identified ranges
 	# data['interesting_vel'] = interestingvel(data)
-
+	print('findranges: ' + str(datetime.datetime.now()))
 	if data['interesting_vel'] != None:
 		sig_vel_list = data['interesting_vel']
 	else:
@@ -80,6 +80,7 @@ def findranges(data, num_chan = 1, sigma_tolerance = 1.5): # adds 'interesting_v
 	data['sig_vel_ranges'] = sig_vel_ranges
 	return data
 def interestingvel(data = None): # returns interesting_vel
+	print('interestingvel: ' + str(datetime.datetime.now()))
 	id_vel_list = []
 	dv = np.abs(data['vel_axis']['1612'][1] - data['vel_axis']['1612'][0])
 	# Flag features
@@ -139,6 +140,7 @@ def interestingvel(data = None): # returns interesting_vel
 		# print('No interesting velocities identified')
 		return []
 def derivative(vel_axis = None, spectrum = None, _range = 20): # returns dx
+	print('derivative: ' + str(datetime.datetime.now()))
 	extra = [0] * int(_range / 2) # _range will be even
 	dx = []
 
@@ -160,12 +162,14 @@ def mpfitlinear(a = None, fjac = None, x = None, y = None): # returns [0, residu
 	'''
 	x and y should be small arrays of length '_range' (from parent function). 
 	'''
+	print('mpfitlinear: ' + str(datetime.datetime.now()))
 	[m, c] = a # gradient and y intercept of line
 	model_y = m * np.array(x) + c
 	residuals = (np.array(y) - model_y)
 
 	return [0, residuals]
 def findrms(spectrum = None): # returns rms
+	print('findrms: ' + str(datetime.datetime.now()))
 	x = len(spectrum)
 	a = int(x / 10)
 	rms_list = []
@@ -178,6 +182,7 @@ def zeros(x_axis = None, y_axis = None, y_rms = None): # returns boolean array l
 	'''
 	produces a boolean array of whether or not an x value is a zero
 	'''	
+	print('zeros: ' + str(datetime.datetime.now()))
 	gradient_min = abs(2.* y_rms / (x_axis[10] - x_axis[0]))
 
 	zeros = np.zeros(len(x_axis))
@@ -221,6 +226,7 @@ def reducelist(master_list = None, merge_size = 0.5, group_spacing = 0.5*FWHM_ra
 		where v1 and v4 are isolated features that can be fit independently, but v2 and v3 are close 
 		enough in velocity that they must be fit together as a blended feature.
 	'''
+	print('reducelist: ' + str(datetime.datetime.now()))
 	try:
 		master_list = sorted([val for sublist in master_list for val in sublist])
 	except TypeError:
@@ -251,6 +257,7 @@ def mergefeatures(master_list = None, size = None, action = None): # returns mer
 		where v1 and v4 are isolated features that can be fit independently, but v2 and v3 are close 
 		enough in velocity that they must be fit together as a blended feature.
 	'''	
+	print('mergefeatures: ' + str(datetime.datetime.now()))
 	new_merge_list = []
 	check = 0
 	while check < len(master_list):
@@ -277,6 +284,7 @@ def mergefeatures(master_list = None, size = None, action = None): # returns mer
 
 	return new_merge_list
 def sumspectra(data):
+	print('sumspectra: ' + str(datetime.datetime.now()))
 	vel_axes = [data['vel_axis']['1612'], data['vel_axis']['1665'], # 1612 should be shortest
 				data['vel_axis']['1667'], data['vel_axis']['1720']]
 	tau_spectra = [	data['tau_spectrum']['1612'], data['tau_spectrum']['1665'],
@@ -284,8 +292,9 @@ def sumspectra(data):
 	tau_spectra_rms = [ data['tau_rms']['1612'], data['tau_rms']['1665'], 
 						data['tau_rms']['1667'], data['tau_rms']['1720']]
 	num_spec = 4
+	
 	for a in range(4):
-		if not np.all(np.diff(vel_axes[a])):
+		if np.all(np.diff(vel_axes[a])):
 			vel_axes[a], tau_spectra[a] = zip(*sorted(zip(vel_axes[a], tau_spectra[a])))
 
 	regridded_tau_spectra = [np.interp(vel_axes[0], vel_axes[x], tau_spectra[x]) for x in range(4)]
@@ -303,7 +312,7 @@ def sumspectra(data):
 		Texp_spectra_rms = [data['Texp_rms']['1612'], data['Texp_rms']['1665'], 
 							data['Texp_rms']['1667'], data['Texp_rms']['1720']]
 		for a in range(4):
-			if not np.all(np.diff(vel_axes[a])):
+			if np.all(np.diff(vel_axes[a])):
 				vel_axes[a], Texp_spectra[a] = zip(*sorted(zip(vel_axes[a], Texp_spectra[a])))
 		
 		regridded_Texp_spectra = [np.interp(vel_axes[0], vel_axes[x], Texp_spectra[x]) for x in range(4)]
@@ -333,6 +342,7 @@ def placegaussians(data = None, Bayes_threshold = 10, use_molex = True, a = None
 	'''
 	mpfit, emcee, decide whether or not to add another gaussian
 	'''
+	print('placegaussians: ' + str(datetime.datetime.now()))
 	accepted_full = []
 	total_num_gauss = 0
 	plot_num = 0
@@ -413,6 +423,7 @@ def placegaussians(data = None, Bayes_threshold = 10, use_molex = True, a = None
 		return accepted_full
 def trimdata(data = None, min_vel = None, max_vel = None): # returns modified_data
 	
+	print('trimdata: ' + str(datetime.datetime.now()))
 	data_temp = copy.deepcopy(data)
 
 	data_temp['interesting_vel'] = [x for x in data_temp['interesting_vel'] if x >= min_vel and x <= max_vel]
@@ -464,6 +475,7 @@ def trimdata(data = None, min_vel = None, max_vel = None): # returns modified_da
 	return data_temp
 # Find null evidence
 def nullevidence(modified_data = None): # returns null_evidence
+	print('nullevidence: ' + str(datetime.datetime.now()))
 	model_1612 = np.zeros(len(modified_data['tau_spectrum']['1612']))
 	model_1665 = np.zeros(len(modified_data['tau_spectrum']['1665']))
 	model_1667 = np.zeros(len(modified_data['tau_spectrum']['1667']))
@@ -503,6 +515,7 @@ def nullevidence(modified_data = None): # returns null_evidence
 			lnllh_Texp_1667, lnllh_Texp_1720])
 	return lnllh	
 def lnlikelihood(model = None, spectrum = None, sigma = None): # returns lnlikelihood
+	print('lnlikelihood: ' + str(datetime.datetime.now()))
 	N = len(spectrum)
 	sse = np.sum((np.array(model) - np.array(spectrum))**2.)
 	return -N * np.log(sigma * np.sqrt(2. * np.pi)) - (sse / (2. * (sigma**2.)))
@@ -511,6 +524,7 @@ def bestparams(chain = None, lnprob = None): # returns ([-sig, med, +sig] for al
 	Tested and verified 22/3/19
 	'''
 	# separate out walkers with very different positions
+	print('bestparams: ' + str(datetime.datetime.now()))
 
 	(grouped_chains, grouped_lnprob) = splitwalkers(chain, lnprob)
 
@@ -573,6 +587,7 @@ def bestparams(chain = None, lnprob = None): # returns ([-sig, med, +sig] for al
 def p0gen(vel_range = None, num_gauss = None, modified_data = None, 
 	accepted_params = [], last_accepted_params = [], nwalkers = None, 
 	use_molex = True):
+	print('p0gen: ' + str(datetime.datetime.now()))
 	# generate p0
 	if use_molex:
 		p0_0 = num_gauss * [
@@ -688,10 +703,11 @@ def p0gen(vel_range = None, num_gauss = None, modified_data = None,
 		print('Failed to find initial positions for walkers! Check allowed ' 
 			+ 'ranges for parameters, they may be too restrictive.')
 # converts between x <--> p --> params
-def molex(p = [], x = None, modified_data = None, num_gauss = 1, return_Tex = False, path = '/home/apetzler/Redoing_images_for_MRes_paper/ohslab', file_suffix = None): # returns params
+def molex(p = [], x = None, modified_data = None, num_gauss = 1, return_Tex = False, path = '/Users/anitahafner/Documents/Marks_OH_ex_code/ohslab', file_suffix = None): # returns params
 	'''
 	If return_Tex == True, Tex will be returned instead of N. Use with caution.
 	'''
+	print('molex: ' + str(datetime.datetime.now()))
 	if p == []:
 		p = plist(x, modified_data, num_gauss)
 
@@ -707,8 +723,10 @@ def molex(p = [], x = None, modified_data = None, num_gauss = 1, return_Tex = Fa
 			logTdint, logTd] = p[int(gaussian * 12):int((gaussian + 1) * 12)]
 
 		# check if temp.txt exists - erase
+		# if file_suffix == None:
+		# 	file_suffix = str(datetime.datetime.now())
 		try: 
-			subprocess.run('rm temp_' + str(file_suffix) + '.txt', shell = True, 
+			subprocess.run('rm temp.txt', shell = True, 
 				stderr=subprocess.DEVNULL)
 		except:
 			pass
@@ -716,7 +734,7 @@ def molex(p = [], x = None, modified_data = None, num_gauss = 1, return_Tex = Fa
 		# Write ohslab.in file
 		with open('oh_slab.in', 'w') as oh_slab:
 			# Based on template! Don't touch!
-			oh_slab.write('\'temp_' + str(file_suffix) + '.txt\'\nF\nF\n' + str(10.**logTgas) + '\n' + 
+			oh_slab.write('\'temp.txt\'\nF\nF\n' + str(10.**logTgas) + '\n' + 
 				str(FWHM) + '\n' + str(fortho) + '\n')
 			oh_slab.write(str(10.**logxOH) + '\n' + str(10.**logxHe) + '\n' + 
 				str(10.**logxe) + '\nF\n' + str(10.**logTdint) + '\n' + 
@@ -731,7 +749,7 @@ def molex(p = [], x = None, modified_data = None, num_gauss = 1, return_Tex = Fa
 		subprocess.call('make ohslab', shell = True, stdout=subprocess.DEVNULL)
 		subprocess.run([path], shell = True, stdout=subprocess.DEVNULL)
 		try:
-			with open('temp_' + str(file_suffix) + '.txt', 'r') as f:
+			with open('temp.txt', 'r') as f:
 				for line in islice(f, 33, 34):
 					Tex_1612, tau0_1612, Tex_1665, tau0_1665, Tex_1667, tau0_1667, Tex_1720, tau0_1720 = line.split()[3:11]
 			[Tex_1612, tau0_1612, Tex_1665, tau0_1665, Tex_1667, tau0_1667, Tex_1720, tau0_1720] = [float(Tex_1612), float(tau0_1612), float(Tex_1665), float(tau0_1665), float(Tex_1667), float(tau0_1667), float(Tex_1720), float(tau0_1720)]
@@ -744,10 +762,11 @@ def molex(p = [], x = None, modified_data = None, num_gauss = 1, return_Tex = Fa
 			[N1, N2, N3, N4] = NtauTex(tau_1612 = tau0_1612, tau_1665 = tau0_1665, tau_1667 = tau0_1667, tau_1720 = tau0_1720, Tex_1612 = Tex_1612, Tex_1665 = Tex_1665, Tex_1667 = Tex_1667, Tex_1720 = Tex_1720, fwhm = FWHM)
 			output[int(6 * gaussian):int(6 * (gaussian + 1))] = [vel, FWHM, N1, N2, N3, N4]
 		# erase temp.txt
-		subprocess.run('rm temp_' + str(file_suffix) + '.txt', shell = True, stderr = subprocess.DEVNULL)
+		subprocess.run('rm temp.txt', shell = True, stderr = subprocess.DEVNULL)
 
 	return output
 def plist(x = None, data = None, num_gauss = None): # returns p
+	print('plist: ' + str(datetime.datetime.now()))
 	p = ([True] + list(data['parameter_list'])) * int(num_gauss)
 	x_counter = 0
 	for a in range(len(p)):
@@ -756,14 +775,17 @@ def plist(x = None, data = None, num_gauss = None): # returns p
 			x_counter += 1
 	return p
 def xlist(p = None, data = None, num_gauss = None): # returns x
+	print('xlist: ' + str(datetime.datetime.now()))
 	parameter_list = ([True] + list(data['parameter_list'])) * int(num_gauss)
 	x = [p[a] for a in range(len(p)) if type(parameter_list[a]) == bool and parameter_list[a] == True]
 	return x
 # converts between tau, Tex, Texp, N
 def Texp(tau = None, Tbg = None, Tex = None): # returns Texp
+	print('Texp: ' + str(datetime.datetime.now()))
 	Texp = (Tex - Tbg) * (1 - np.exp(-tau))
 	return Texp
 def tau3(tau_1612 = None, tau_1665 = None, tau_1667 = None, tau_1720 = None): # returns all 4 taus when 3 are input
+	print('tau3: ' + str(datetime.datetime.now()))
 	tau_list = np.array([tau_1612, tau_1665, tau_1667, tau_1720])
 	if (tau_list == None).sum() == 1: # only one is left blank, can proceed
 		if tau_1612 == None:
@@ -787,6 +809,7 @@ def tau3(tau_1612 = None, tau_1665 = None, tau_1667 = None, tau_1720 = None): # 
 def tauTexN(logN1 = None, logN2 = None, logN3 = None, logN4 = None, fwhm = None): # returns peak tau and Tex values given 4 log column densities
 	# mp.dps = 50
 	# relevant constants (cgs):
+	print('tauTexN: ' + str(datetime.datetime.now()))
 	con = {
 	'rest_freq': {'1612': 1612231000., '1665': 1665402000., 
 		'1667': 1667359000., '1720': 1720530000.},
@@ -837,6 +860,7 @@ def tauTexN(logN1 = None, logN2 = None, logN3 = None, logN4 = None, fwhm = None)
 			Tex_1612, Tex_1665, Tex_1667, Tex_1720]
 def NtauTex(tau_1612 = None, tau_1665 = None, tau_1667 = None, tau_1720 = None, Tex_1612 = None, Tex_1665 = None, Tex_1667 = None, Tex_1720 = None, fwhm = None): # returns 4 log column densities (assumes consistent input)
 	# relevant constants (cgs):
+	print('NtauTex: ' + str(datetime.datetime.now()))
 	con = {
 	'rest_freq': {'1612': 1612231000., '1665': 1665402000., 
 		'1667': 1667359000., '1720': 1720530000.},
@@ -861,6 +885,7 @@ def NtauTex(tau_1612 = None, tau_1665 = None, tau_1667 = None, tau_1720 = None, 
 
 	return [np.log10(N1), np.log10(N2), np.log10(N3), np.log10(N4)]
 def NrangetauTexp(modified_data = None): # returns 4 log column density ranges based on tau and Texp ranges
+	print('NrangetauTexp: ' + str(datetime.datetime.now()))
 	# relevant constants (cgs):
 	con = {
 	'rest_freq': {'1612': 1612231000., '1665': 1665402000., 
@@ -953,6 +978,7 @@ def NrangetauTexp(modified_data = None): # returns 4 log column density ranges b
 	return [[logN1_min, logN1_max], [logN2_min, logN2_max], [logN3_min, logN3_max], [logN4_min, logN4_max]]
 # makes/plots model from params
 def makemodel(params = None, modified_data = None, accepted_params = [], num_gauss = None, use_molex = True): # returns tau and Texp models
+	print('makemodel: ' + str(datetime.datetime.now()))
 	vel_1612 = modified_data['vel_axis']['1612']
 	vel_1665 = modified_data['vel_axis']['1665']
 	vel_1667 = modified_data['vel_axis']['1667']
@@ -1015,6 +1041,7 @@ def gaussian(mean = None, FWHM = None, height = None, sigma = None, amp = None):
 	'''
 	Generates a gaussian profile with the given parameters.
 	'''
+	print('gaussian: ' + str(datetime.datetime.now()))
 	if sigma == None:
 		sigma = FWHM / (2. * np.sqrt(2. * np.log(2.)))
 
@@ -1025,6 +1052,7 @@ def gaussian(mean = None, FWHM = None, height = None, sigma = None, amp = None):
 def sampleposterior(modified_data = None,  # returns (chain, lnprob)
 	num_gauss = None, p0 = None, vel_range = None, accepted = [], 
 	nwalkers = None, use_molex = True, a = None, file_suffix = None): 
+	print('sampleposterior: ' + str(datetime.datetime.now()))
 	if use_molex:
 		ndim = num_gauss # starts with one for all velocities
 		for a in modified_data['parameter_list']:
@@ -1047,8 +1075,8 @@ def sampleposterior(modified_data = None,  # returns (chain, lnprob)
 	else:
 		accepted_params = [x[1] for x in accepted]
 
-	burn_iterations = 1000
-	final_iterations = 100
+	burn_iterations = 300
+	final_iterations = 50
 	
 	args = [modified_data,[], vel_range, num_gauss, accepted_params, use_molex, file_suffix]
 	sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, args = args, a = a)
@@ -1083,9 +1111,7 @@ def sampleposterior(modified_data = None,  # returns (chain, lnprob)
 		return (np.array(chain), np.array(lnprob_))
 def lnprob(lnprobx = None, modified_data = None, p = [], vel_range = None, 
 	num_gauss = None, accepted_params = [], use_molex = True, file_suffix = None): # returns lnprob
-	'''
-	need to add a test of whether or not the velocities are in order
-	'''
+	print('lnprob: ' + str(datetime.datetime.now()))
 	if use_molex:
 		if p == []:
 			p = plist(lnprobx, modified_data, num_gauss)
@@ -1141,6 +1167,7 @@ def lnprob(lnprobx = None, modified_data = None, p = [], vel_range = None,
 	else:
 		return lprob	
 def lnprprior(modified_data = None, p = [], params = [], vel_range = None, num_gauss = None, use_molex = True): # returns lnprprior
+	print('lnprprior: ' + str(datetime.datetime.now()))
 	lnprprior = 0
 	if use_molex:
 		parameter_list = [True] + modified_data['parameter_list'] # add velocity
@@ -1211,6 +1238,7 @@ def convergencetest(sampler_chain = None, num_gauss = None, pos = None): # retur
 	Tests if the variance across chains is comparable to the variance within the chains.
 	Returns 'Pass' or 'Fail'
 	'''
+	print('convergencetest: ' + str(datetime.datetime.now()))
 	model_dim = int(sampler_chain.shape[2] / num_gauss)
 	orig_num_walkers = sampler_chain.shape[0]
 	counter = 0
@@ -1243,6 +1271,7 @@ def splitwalkers(chain, lnprob, tolerance = 10):
 	'''
 	Note: This may not be needed if I increase 'a' in the EnsembleSampler (a relates to step size or acceptance rate or similar)
 	'''
+	print('splitwalkers: ' + str(datetime.datetime.now()))
 	lnprob = np.array([[[x] for x in y] for y in lnprob])
 	chain = np.array(chain)
 	
@@ -1314,6 +1343,7 @@ def splitwalkers(chain, lnprob, tolerance = 10):
 		return (grouped_chains, grouped_lnprob)
 # priors
 def lnnaiveprior(value = None, value_range = None): # returns lnpriorvalue for naive top-hat prior
+	print('lnnaiveprior: ' + str(datetime.datetime.now()))
 	if value >= value_range[0] and value <= value_range[1]:
 		return -np.log(np.abs(value_range[1] - value_range[0]))
 	else:
@@ -1324,7 +1354,7 @@ def resultsreport(final_parameters = None, final_median_parameters = None, data 
 	'''
 	Generates a nice report of results
 	'''
-
+	print('resultsreport: ' + str(datetime.datetime.now()))
 	short_source_name_dict = {'g003.74+0.64.':'g003', 
 			'g006.32+1.97.':'g006', 
 			'g007.47+0.06.':'g007', 
@@ -1395,7 +1425,7 @@ def resultstable(final_parameters = None, data = None):
 	'''
 	make a latex table
 	'''
-
+	print('resultstable: ' + str(datetime.datetime.now()))
 	if len(final_parameters) > 5:
 		if data['Texp_spectrum']['1665'] != []:
 			for feature in range(int(len(final_parameters) / 10)):
@@ -1438,7 +1468,7 @@ def resultstableexcel(final_parameters = None, final_median_parameters = None, d
 	'''
 	make an excel table
 	'''
-
+	print('resultstableexcel: ' + str(datetime.datetime.now()))
 	if len(final_parameters) > 5:
 
 		final_parameters = final_parameters
@@ -1506,6 +1536,8 @@ def main( # prints final_p
 	Returns parameters of gaussian comp(s): [vel_1, FWHM_1, height_1612_1, height_1665_1, height_1667_1, 
 			height_1720_1, ..., _N] for N comps
 	'''
+	print('main: ' + str(datetime.datetime.now()))
+	print('source name: ' + str(source_name))
 	if file_suffix == None:
 		file_suffix = str(datetime.datetime.now())
 	# initialise data dictionary
@@ -1559,7 +1591,6 @@ def main( # prints final_p
 	###############################################
 
 	findranges(data)
-	print('significant ranges: ' + str(data['sig_vel_ranges']))
 
 	###############################################
 	#                                             #
@@ -1568,3 +1599,5 @@ def main( # prints final_p
 	###############################################
 	
 	final_p = placegaussians(data, Bayes_threshold, use_molex = use_molex, a = a, test = test, file_suffix = file_suffix)
+
+	return final_p
