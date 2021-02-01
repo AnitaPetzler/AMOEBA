@@ -1,34 +1,74 @@
-from mpfit import mpfit
-from statistics import mean
+# from mpfit import mpfit
+# from numba import jit
+# from statistics import mean
 import copy
 import emcee
 import itertools
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import numpy as np
+import pickle
+
+
+'''
+                                   ......                                     
+                                 ..     ...                                   
+                                ..        ..                                  
+                               ..          ..                         .....   
+                               ..           ..                    ...     ... 
+                              ..             ..                ...          ..
+                              ..              ..            ...             ..
+                             ..                ....    .....               .. 
+                            ..                   .......                  ..  
+                            ..                                           ..   
+                          ..                                            ..    
+                        ...                                            ..     
+      ...................                        b                    ..      
+  ...                                            b                   ..       
+ ..  aaaaa a   m mmm mmmm     ooooo     eeeee    b bbbb     aaaaa a  ..       
+..  a     aa   m    m    m   o     o   e     e   b     b   a     aa  .        
+..  a      a   m    m    m   o     o   e eee     b     b   a      a  .        
+ ..  aaaaa a   m    m    m    ooooo     eeeee    b bbbb     aaaaa a  .        
+  ...                                                                ..       
+      ..........                                                      ..      
+               .......                                                 ..     
+                     ...                                                ..    
+                       ...                       ........                ..   
+                        ...                   ....      ...              ..   
+                         ..                 ...             ....          ..  
+                          ..              ...                   ..       ..   
+                          ..            ...                        .......    
+                          ..           ..                                     
+                           ..        ..                                       
+                            ....  ....                                        
+                              .....                                           
+'''
+
+'''
+
+The four hyperfine levels of the OH ground rotational state:
+
+	1612 1665 1667 1720
+	_____________________ N4
+	___________|____|____ N3
+	_|____|____|____|____ N2
+	______|_________|____ N1
+
+'''
+
+# Some key parameters:
+# number of burn iterations for emcee (100 is low, 10000 is high)
+burn_iter = 1000
+# number of final iterations for emcee (50 is low, 1000 is high)
+final_iter = 100
 
 
 
-#############################
-#                           #
-#   M   M        i          #
-#   MM MM   aa      n nn    #
-#   M M M   aaa  i  nn  n   #
-#   M   M  a  a  i  n   n   #
-#   M   M   aaa  i  n   n   #
-#                           #
-#############################
-
-def main( # prints final_p
-	source_name,
-	vel_axes = None, 
-	tau_spectra = None, 
-	Texp_spectra = None, 
-	Tbg = None, 
-	misc = None,
-	quiet = True, 
-	best_result = 'median_actual',
-	Bayes_threshold = 10., 
-	sigma_tolerance = 1.5):
+def main(source_name, vel_axes = None, tau_spectra = None, 
+	Texp_spectra = None, tau_rms = None, 
+	Texp_rms = None, Tbg = None, quiet = True, #misc = None, 
+	best_result = 'median_actual', Bayes_threshold = 10., 
+	sigma_tolerance = 1.4, num_chan = 3, N_range = (5,25), 
+	seed=None, extra_gaussians=1,sig_vels=None,lfwhm_mean=None,lfwhm_sig=None):
 	'''
 	Performs fully automated gaussian decomposition. This code was written 
 	specifically to decompose spectra of the four ground rotational state 
@@ -38,8 +78,8 @@ def main( # prints final_p
 	Parameters:
 		source_name (str): name of source to be included with results reports
 	Keyword Arguments:
-		vel_axes (array-like): set of 4 1D arrays corresponding to the 4 spectra 
-			of the ground state transitions of OH
+		vel_axes (array-like): set of 4 1D arrays corresponding to the 4 
+			spectra of the ground state transitions of OH
 		tau_spectra (array-like): set of 4 1D arrays of optical depth in the 4 
 			ground rotational state transitions of OH
 		Texp_spectra (array-like): set of 4 1D arrays of expected brightness 
@@ -60,21 +100,46 @@ def main( # prints final_p
 			lnprob.
 		Bayes_threshold (float): minimum Bayes' Factor (K) required for the 
 			fitting routine to attempt to fit an additional gaussian feature
-		sigma_tolerance (float): factor used to identify 'significant' ranges in 
-			the supplied spectra. Roughly related to sigma level but *NOT* 
+		sigma_tolerance (float): factor used to identify 'significant' ranges 
+			in the supplied spectra. Roughly related to sigma level but *NOT* 
 			equivalent. Increase sigma_tolerance to reduce the range of spectra 
 			identified.
+		N_range (tuple): range of log column density expected. Values in this 
+			range will have a flat prior, the prior for values outside it will 
+			drop off exponentially.
 	Returns:
-		array-like: Full list of accepted parameters with upper and lower bounds of
-			credibile intervals. Format: [[1min, 1median, 1max], [2min, 2median, 2max],...] for 
-			parameters 1, 2, etc.
+		array-like: Full list of accepted parameters with upper and lower 
+			bounds of credibile intervals. Format: [[1min, 1median, 1max], 
+			[2min, 2median, 2max],...] for parameters 1, 2, etc.
 	'''
-	if not quiet:
-		print('source name: ' + str(source_name))
+	
+	# Quick checks of input data:
+	# if misc == None:
+	if Texp_spectra != None:
+		for x in range(4):
+			if len(vel_axes[x]) != len(Texp_spectra[x]):
+				print('Provided axes (' + str(x) + ') lengths do not match')
+				print('\tvel axis length: '+str(len(vel_axes[x]))+
+					' spectrum axis length: '+str(len(Texp_spectra[x])))
+				return None
+	for x in range(4):
+		if len(vel_axes[x]) != len(tau_spectra[x]):
+			print('Provided axes (' + str(x) + ') lengths do not match')
+			print('\tvel axis length: '+str(len(vel_axes[x]))+
+				' spectrum axis length: '+str(len(tau_spectra[x])))
+			return None
+	# else:
+	# 	for x in range(len(misc)):
+	# 		if len(misc[x][0]) != len(misc[x][1]):
+	# 			print('Provided axes (' + str(x) + ') lengths do not match')
+	# 			print('\tvel axis length: '+str(len(misc[x][0]))+
+	# 				' spectrum axis length: '+str(len(misc[x][1])))
+	# 			return None
+
 
 	# initialise data dictionary
 	# print('starting ' + source_name)
-	data = {'source_name': source_name, 
+	full_data = {'source_name': source_name, 
 		'vel_axis':{'1612':[],'1665':[],'1667':[],'1720':[]},
 		'tau_spectrum':{'1612':[],'1665':[],'1667':[],'1720':[]},
 		'tau_rms':{'1612':[],'1665':[],'1667':[],'1720':[]},
@@ -82,8 +147,7 @@ def main( # prints final_p
 		'Texp_rms':{'1612':[],'1665':[],'1667':[],'1720':[]},
 		'Tbg':{'1612':[],'1665':[],'1667':[],'1720':[]},
 		'misc':misc,
-		'sig_vel_ranges':[[]],
-		'interesting_vel':[]}
+		'sig_vel_ranges':[[]]}
 
 		###############################################
 		#                                             #
@@ -91,42 +155,52 @@ def main( # prints final_p
 		#                                             #	
 		###############################################
 	
-	if misc == None:
+	# if misc == None:
+	if tau_rms == None:
+		full_data['tau_rms']['1612'] = findrms(tau_spectra[0])
+		full_data['tau_rms']['1665'] = findrms(tau_spectra[1])
+		full_data['tau_rms']['1667'] = findrms(tau_spectra[2])
+		full_data['tau_rms']['1720'] = findrms(tau_spectra[3])
+	else:
+		full_data['tau_rms']['1612'] = tau_rms[0]
+		full_data['tau_rms']['1665'] = tau_rms[1]
+		full_data['tau_rms']['1667'] = tau_rms[2]
+		full_data['tau_rms']['1720'] = tau_rms[3]
+
+	full_data['vel_axis']['1612']		= vel_axes[0]
+	full_data['tau_spectrum']['1612']	= tau_spectra[0]
+
+	full_data['vel_axis']['1665']		= vel_axes[1]
+	full_data['tau_spectrum']['1665']	= tau_spectra[1]
+
+	full_data['vel_axis']['1667']		= vel_axes[2]
+	full_data['tau_spectrum']['1667']	= tau_spectra[2]
+
+	full_data['vel_axis']['1720']		= vel_axes[3]
+	full_data['tau_spectrum']['1720']	= tau_spectra[3]
+
+	if Texp_spectra != None: #absorption and emission spectra are available 
+			# (i.e. on-off observations)
+		if Texp_rms == None:
+			full_data['Texp_rms']['1612'] = findrms(Texp_spectra[0])
+			full_data['Texp_rms']['1665'] = findrms(Texp_spectra[1])
+			full_data['Texp_rms']['1667'] = findrms(Texp_spectra[2])
+			full_data['Texp_rms']['1720'] = findrms(Texp_spectra[3])
+		else:
+			full_data['Texp_rms']['1612'] = Texp_rms[0]
+			full_data['Texp_rms']['1665'] = Texp_rms[1]
+			full_data['Texp_rms']['1667'] = Texp_rms[2]
+			full_data['Texp_rms']['1720'] = Texp_rms[3]
 		
-		data['tau_rms']['1612'] = findrms(tau_spectra[0])
-		data['tau_rms']['1665'] = findrms(tau_spectra[1])
-		data['tau_rms']['1667'] = findrms(tau_spectra[2])
-		data['tau_rms']['1720'] = findrms(tau_spectra[3])
+		full_data['Tbg']['1612']				= Tbg[0]
+		full_data['Tbg']['1665']				= Tbg[1]
+		full_data['Tbg']['1667']				= Tbg[2]
+		full_data['Tbg']['1720']				= Tbg[3]
 
-		data['vel_axis']['1612']		= vel_axes[0]
-		data['tau_spectrum']['1612']	= tau_spectra[0]
-
-		data['vel_axis']['1665']		= vel_axes[1]
-		data['tau_spectrum']['1665']	= tau_spectra[1]
-
-		data['vel_axis']['1667']		= vel_axes[2]
-		data['tau_spectrum']['1667']	= tau_spectra[2]
-
-		data['vel_axis']['1720']		= vel_axes[3]
-		data['tau_spectrum']['1720']	= tau_spectra[3]
-
-		if Texp_spectra != None: #absorption and emission spectra are available 
-				# (i.e. on-off observations)
-			
-			data['Texp_rms']['1612'] = findrms(Texp_spectra[0])
-			data['Texp_rms']['1665'] = findrms(Texp_spectra[1])
-			data['Texp_rms']['1667'] = findrms(Texp_spectra[2])
-			data['Texp_rms']['1720'] = findrms(Texp_spectra[3])
-			
-			data['Tbg']['1612']				= Tbg[0]
-			data['Tbg']['1665']				= Tbg[1]
-			data['Tbg']['1667']				= Tbg[2]
-			data['Tbg']['1720']				= Tbg[3]
-
-			data['Texp_spectrum']['1612']	= Texp_spectra[0]
-			data['Texp_spectrum']['1665']	= Texp_spectra[1]
-			data['Texp_spectrum']['1667']	= Texp_spectra[2]
-			data['Texp_spectrum']['1720']	= Texp_spectra[3]
+		full_data['Texp_spectrum']['1612']	= Texp_spectra[0]
+		full_data['Texp_spectrum']['1665']	= Texp_spectra[1]
+		full_data['Texp_spectrum']['1667']	= Texp_spectra[2]
+		full_data['Texp_spectrum']['1720']	= Texp_spectra[3]
 
 
 	###############################################
@@ -134,21 +208,22 @@ def main( # prints final_p
 	#         Identify significant ranges         #
 	#                                             #
 	###############################################
-
-	findranges(data, sigma_tolerance)
-
+	if sig_vels==None:
+		findranges(full_data, sigma_tolerance, num_chan)
+		print(source_name+' '+str(full_data['sig_vel_ranges']))
+	else:
+		full_data['sig_vel_ranges']=sig_vels
+	
 	###############################################
 	#                                             #
 	#                Fit gaussians                #
 	#                                             #
 	###############################################
 	
-	final_p = placegaussians(data, Bayes_threshold = Bayes_threshold, 
-		quiet = quiet, best_result = best_result)
+	final_p=placegaussians(full_data,Bayes_threshold,quiet,best_result,
+		N_range,seed,extra_gaussians,lfwhm_mean,lfwhm_sig)
 
 	return final_p
-
-
 
 
 
@@ -162,179 +237,71 @@ def main( # prints final_p
 #            \ | /
 #             \|/
 #              V
-def findranges(data, sigma_tolerance = 1.5, num_chan = 1): 
+
+def findranges(data, sigma_tolerance, num_chan): 
 	'''
 	Identifies velocity ranges likely to contain features. Adds 
-	'interesting_vel' (velocity channels with maxima/minima/inflection points) 
-	and 'sig_vel_ranges' (velocity ranges that satisfy a significance test) to 
-	the 'data' dictionary.	
+	'sig_vel_ranges' (velocity ranges that satisfy a significance test) to the 
+	'data' dictionary.	
 
 	Parameters:
 		data (dict): observed spectra and other observed quantities (see 
 			Main function)
-	Keyword Arguments:
-		sigma_tolerance (float): signal to noise ratio threshold for a channel of the 
-			'summed spectra' to be identified as 'significant'.
-		num_chan (int): number of channels over which to bin summed spectra in order to 
-			check for significance
+		sigma_tolerance (float): signal to noise ratio threshold for a channel 
+			to be identified as 'significant'.
+		num_chan (int): number of consecutive channels that must be 
+			'significant' to be reported order to check for significance
 	Returns:
 		dict: 'data' dictionary with updated 'sig_vel_ranges' keyword
 	'''
-	data = interestingvel(data)
-	if data['interesting_vel'] != []:
-		sig_vel_list = data['interesting_vel']
-	else:
-		sig_vel_list = []
-
-	summed_spectra = sumspectra(data)
-	if data['misc'] != None:
-		bool_summed = [np.mean(summed_spectra[x:x+num_chan]) >= sigma_tolerance 
-			for x in range(len(data['misc'][0][0]) - num_chan)]
-		sig_vel_list += [data['misc'][0][0][x] for x in range(len(bool_summed)) 
-			if bool_summed[x] == True]
-	else:
-		bool_summed = [np.mean(summed_spectra[x:x+num_chan]) >= sigma_tolerance 
-			for x in range(len(data['vel_axis']['1612']) - num_chan)]
-		sig_vel_list += [data['vel_axis']['1612'][x] for x in 
-			range(len(bool_summed)) if bool_summed[x] == True]
-
-	# merges closely spaced velocities, groups moderately spaced velocities
-	sig_vel_list = reducelist(sig_vel_list)
-	sig_vel_ranges = [[x[0], x[-1]] for x in sig_vel_list if x[0] != x[-1]]
-	data['sig_vel_ranges'] = sig_vel_ranges
-	return data
-def interestingvel(data):
-	'''
-	Identifies the location of potential features (maxima, minima, 
-	inflections, etc) and places them in the list 'interesting_vel' in the 
-	'data' dictionary.
-
-	Parameters:
-		data (dict): observed spectra and other observed quantities (see 
-			Main function)
-	Returns:
-		dict: 'data' dictionary with updated 'interesting_vel' 
-			keyword
-	'''
-	id_vel_list = []
-	# Flag features
 	
 	if data['misc'] != None:
+		num_spec=len(data['misc'])
 		vel_axes = [x[0] for x in data['misc']]
 		spectra = [x[1] for x in data['misc']]
-		spectra_rms = [findrms(x) for x in spectra]
-
-	elif 'Texp_spectrum' in data and data['Texp_spectrum']['1665'] != []:
-		vel_axes = [data['vel_axis']['1612'], data['vel_axis']['1665'], 
-					data['vel_axis']['1667'], data['vel_axis']['1720']] * 2
-		spectra = [	data['tau_spectrum']['1612'], data['tau_spectrum']['1665'], 
-					data['tau_spectrum']['1667'], data['tau_spectrum']['1720'], 
-					data['Texp_spectrum']['1612'], 
-					data['Texp_spectrum']['1665'], 
-					data['Texp_spectrum']['1667'], 
-					data['Texp_spectrum']['1720']]
-		spectra_rms = [data['tau_rms']['1612'], data['tau_rms']['1665'], 
-					data['tau_rms']['1667'], data['tau_rms']['1720'], 
-					data['Texp_rms']['1612'], data['Texp_rms']['1665'], 
-					data['Texp_rms']['1667'], data['Texp_rms']['1720']]
 	else:
+		num_spec=4
 		vel_axes = [data['vel_axis']['1612'], data['vel_axis']['1665'], 
 					data['vel_axis']['1667'], data['vel_axis']['1720']]
 		spectra = [	data['tau_spectrum']['1612'], data['tau_spectrum']['1665'], 
-					data['tau_spectrum']['1667'], data['tau_spectrum']['1720']]
-		spectra_rms = [data['tau_rms']['1612'], data['tau_rms']['1665'], 
-					data['tau_rms']['1667'], data['tau_rms']['1720']]
-
-	dv = np.abs(vel_axes[0][1] - vel_axes[0][0])
-	for s in range(len(vel_axes)):
-		vel_axis = vel_axes[s]
-		spectrum = spectra[s]
-		spectrum_rms = spectra_rms[s]
-
-		dx = derivative(vel_axis, spectrum)
-		dx2 = derivative(vel_axis, dx, 2)
-
-		rms_dx = findrms(dx)
-		rms_dx2 = findrms(dx2)
-
-		spectrum_zero = [abs(x) < 2. * spectrum_rms for x in spectrum]
-		spectrum_pos = [x > 2. * spectrum_rms for x in spectrum]
-		
-		dx_pos = [x > 2. * rms_dx for x in dx]
-		dx2_pos = [x > 2. * rms_dx2 for x in dx2]
-		
-		dx_zero = zeros(vel_axis, dx, y_rms = rms_dx)
-		dx2_zero = zeros(vel_axis, dx2, y_rms = rms_dx2)		
-
-		vel_list1 = [vel_axis[z] for z in range(int(len(dx_pos) - 1)) if 
-			dx_zero[z] == True and spectrum_pos[z] != dx2_pos[z]]
-		vel_list2 = [vel_axis[z] for z in range(1,int(len(dx2_zero) - 1)) if 
-			dx2_zero[z] == True and spectrum_zero[z] == False and np.any([x <= 
-			dx2_zero[z+1] and x >= dx2_zero[z-1] for x in dx_zero]) == False]
-		
-		vel_list = np.concatenate((vel_list1, vel_list2))
-		
-		id_vel_list.append(vel_list)
+					data['tau_spectrum']['1667'], data['tau_spectrum']['1720']]	
+		spec_rmss = [data['tau_rms']['1612'], data['tau_rms']['1665'], 
+					data['tau_rms']['1667'], data['tau_rms']['1720']]	
+	if 'Texp_spectrum' in data and data['Texp_spectrum']['1665'] != []:
+		num_spec+=4
+		vel_axes += [data['vel_axis']['1612'], data['vel_axis']['1665'], 
+					data['vel_axis']['1667'], data['vel_axis']['1720']]
+		spectra += [data['Texp_spectrum']['1612'], 
+					data['Texp_spectrum']['1665'], 
+					data['Texp_spectrum']['1667'], 
+					data['Texp_spectrum']['1720']]
+		spec_rmss += [data['Texp_rms']['1612'], data['Texp_rms']['1665'], 
+					data['Texp_rms']['1667'], data['Texp_rms']['1720']]
+	sig_vel_list=[]
+	for spec in range(num_spec):
+		vel_axis=vel_axes[spec]
+		spectrum=spectra[spec]
+		spec_rms=spec_rmss[spec]
+		test_spec=[1 if x>=sigma_tolerance*spec_rms else -1 if 
+			x<=-sigma_tolerance*spec_rms else 0 for x in spectrum]
+		for c in range(int(len(vel_axis)-num_chan)):
+			if (np.sum(test_spec[c:c+num_chan]) >= num_chan) or (np.sum(
+				test_spec[c:c+num_chan]) <= -num_chan):
+				for x in range(num_chan):
+					if sig_vel_list == []:
+						sig_vel_list=[vel_axis[int(c+x)]]
+					else:
+						sig_vel_list+=[vel_axis[int(c+x)]]
 	
-	id_vel_list = sorted([val for sublist in id_vel_list for val in sublist])
+	# This next bit needs to be changed (and tested)
+	[av_chan,minv,maxv]=[np.mean([np.abs(v[1]-v[0]) for v in vel_axes]),
+		np.max([np.min(v) for v in vel_axes]),
+		np.min([np.max(v) for v in vel_axes])]
+	
+	sig_vel_ranges = reducelist(sig_vel_list,2*num_chan*av_chan,minv,maxv)
 
-	if len(id_vel_list) != 0:
-		id_vel_list = reducelist(id_vel_list, 3 * dv, 1) # removes duplicates
-		id_vel_list = sorted([val for sublist 
-				in id_vel_list for val in sublist])
-		data['interesting_vel'] = id_vel_list
-		return data
+	data['sig_vel_ranges'] = sig_vel_ranges
 	return data
-def derivative(vel_axis, spectrum, _range = 20): # returns dx
-	'''
-	Calculates a simple numerical derivative of 'spectrum' by fitting a 
-	straight line to ranges of '_range' channels in 'vel_axis'.
-
-	Parameters:
-		vel_axis (array-like): x-axis corresponding to 'spectrum' (assumed to be velocity but 
-			not necessary)
-		spectrum (array-like): y-axis values
-	Keyword Arguments:
-		_range (int): number of channels over which to fit a straight line
-	Returns:
-		array: dy/dx array
-	'''
-	extra = [0] * int(_range / 2) # _range will be even
-	dx = []
-
-	for start in range(int(len(vel_axis) - _range)):
-		x = vel_axis[start:int(start + _range + 1)]
-		y = spectrum[start:int(start + _range + 1)]
-
-		guess = [(y[0] - y[-1]) / (x[0] - x[-1]), 0]
-		parinfo = [	{'parname':'gradient','step':0.0001, 'limited': [1, 1], 
-					'limits': [-20., 20.]}, 
-					{'parname':'y intercept','step':0.001, 'limited': [1, 1], 
-					'limits': [-1000., 1000.]}]
-		fa = {'x': x, 'y': y}
-		
-		mp = mpfit(mpfitlinear, guess, parinfo = parinfo, functkw = fa, 
-			maxiter = 10000, quiet = True)
-		gradient = mp.params[0]
-		dx.append(gradient)
-	dx = np.concatenate((extra, dx, extra))
-	return dx
-def mpfitlinear(a, fjac, x, y): # returns [0, residuals]
-	'''
-	Determines residuals from a linear fit to data (x,y).
-
-	Parameters:
-		a (array-like): coefficients of the linear model: [m, c] where y = mx + c
-		x (array-like): 1D list of 'x' values
-		y (array-like): 1D list of 'y' values
-	Returns:
-		list: Status marker '0', 1D array of residuals of the fit.
-	'''
-	[m, c] = a # gradient and y intercept of line
-	model_y = m * np.array(x) + c
-	residuals = (np.array(y) - model_y)
-
-	return [0, residuals]
 def findrms(spectrum): # returns rms
 	'''
 	Calculates the root mean square of 'spectrum'. This is intended as a 
@@ -346,201 +313,44 @@ def findrms(spectrum): # returns rms
 	Returns:
 		float: Median rms of those calculated 
 	'''
-	x = len(spectrum)
-	a = int(x / 10)
-	rms_list = []
-	for _set in range(9):
-		rms = np.std(spectrum[(_set * a):(_set * a) + (2 * a)])
-		rms_list.append(rms)
-	median_rms = np.median(rms_list)
-	return median_rms
-def zeros(x_axis, y_axis, y_rms = None):
+	# print(spectrum)
+	a=len(spectrum)/20
+	a=int(a-a%1)
+	rms_list=[np.std(spectrum[int(20*(x-1)):int(20*(x-1)+30)]) 
+		for x in range(1,a)]
+	return np.median(rms_list)
+def reducelist(vlist, spacing,minv,maxv):
 	'''
-	Produces a boolean array of length = len(x_axis) of whether or not an x 
-	value is a zero, determined by the behaviour of a linear fit to surrounding 
-	points.
+	Takes a list of velocities with 'significant' signal (as determined by 
+	'findranges') and identifies places where the spectra can be safely 
+	segmented in order to minimise the length of spectra fit by 
+	'placegaussians'.
 
 	Parameters:
-		x_axis (array-like): 1d array of x values
-		y_axis (array-like): 1d array of y values
-	Keyword Arguments:
-		y_rms (float): rms noise of y_axis
+		vlist (array-like): unsorted list of velocity channels at which 
+			'significant' signal exists in at least one spectrum.
+		spacing (float): extent in velocity (km/s) required to be 
+			'insignificant' in order to allow spectra to be 'cut'. This should 
+			equate to some small multiple (i.e. 2) of the 'num_chan' parameter 
+			in 'findranges'.
 	Returns:
-		array: Boolean array of length = len(x_axis) of whether or not an x value is a 
-			zero.
-	'''	
-	if y_rms == None:
-		y_rms = findrms(y_axis)
-
-	gradient_min = abs(2.* y_rms / (x_axis[10] - x_axis[0]))
-
-	zeros = np.zeros(len(x_axis))
-	for x in range(5, int(len(x_axis) - 5)):
-		x_axis_subset = x_axis[x-5:x+6]
-		y_axis_subset = y_axis[x-5:x+6]
-
-		guess = [1., 1.]
-		parinfo = [	{'parname':'gradient','step':0.001}, 
-					{'parname':'y intercept','step':0.001}]
-		fa = {'x': x_axis_subset, 'y': y_axis_subset}
-
-		mp = mpfit(mpfitlinear, guess, parinfo = parinfo, functkw = fa, 
-			maxiter = 10000, quiet = True)
-		[grad_fit, y_int_fit] = mp.params
-
-		if abs(grad_fit) >= gradient_min:
-
-			# find y values on either side of x to test sign. True = pos
-			if (grad_fit * x_axis[x-1] + y_int_fit > 0 and grad_fit * 
-				x_axis[x+1] + y_int_fit < 0):
-				zeros[x] = 1
-			elif (grad_fit * x_axis[x-1] + y_int_fit < 0 and grad_fit * 
-				x_axis[x+1] + y_int_fit > 0):
-				zeros[x] = 1
-	return zeros
-def sumspectra(data):
+		vlist_output (2D list): list of min and max velocity of each spectrum 
+			segment, in the form [[v1min,v1max],...,[vnmin,vnmax]].
 	'''
-	Regrids, normalises and finds the summed root mean square a set of spectra 
-	to later identify regions of significance.
+	vlist=sorted(vlist)
 
-	Parameters:
-		data (dict): observed spectra and other observed quantities (see 
-			Main function)
-	Returns:
-		array: The summed root mean square of the spectra.
-	'''
-	if data['misc'] != None:
-		vel_axes = np.array([x[0] for x in data['misc']])
-		spectra = np.array([x[1] for x in data['misc']])
-		spectra_rms = np.array([findrms(x) for x in spectra])
-		num_spec = len(data['misc'])
+	cut_list=[(vlist[x]+vlist[x+1])/2 for x in range(int(len(vlist)-1)) if (vlist[x+1]-vlist[x])>=spacing]
+	if len(cut_list) == 0:
+		cut_list=[minv,maxv]
 	else:
-		vel_axes = [data['vel_axis']['1612'], data['vel_axis']['1665'],
-					data['vel_axis']['1667'], data['vel_axis']['1720']]
-		spectra = [	data['tau_spectrum']['1612'], data['tau_spectrum']['1665'],
-					data['tau_spectrum']['1667'], data['tau_spectrum']['1720']]
-		spectra_rms = [ data['tau_rms']['1612'], data['tau_rms']['1665'], 
-						data['tau_rms']['1667'], data['tau_rms']['1720']]
-		num_spec = 4
-	
-	for a in range(num_spec):
-		if not np.all(np.diff(vel_axes[a])):
-			vel_axes[a], spectra[a] = zip(*sorted(zip(vel_axes[a],spectra[a])))
+		if cut_list[0] >= minv:
+			cut_list = [minv] + cut_list
+		if cut_list[-1] <= maxv:
+			cut_list = cut_list + [maxv]
+	vlist_output=[[cut_list[x],cut_list[x+1]] for x in 
+		range(int(len(cut_list)-1))]
+	return vlist_output
 
-	regridded_spectra = [np.interp(vel_axes[0], vel_axes[x], spectra[x]) for x 
-		in range(len(spectra))]
-	norm_spectra = [regridded_spectra[x] / spectra_rms[x] for x in 
-		range(len(spectra))]
-	sqrd_spectra = [norm_spectra[x]**2 for x in range(len(spectra))]
-	summed = np.zeros(len(sqrd_spectra[0]))
-
-	for b in range(num_spec):
-		summed += sqrd_spectra[b]
-
-	if 'Texp_spectrum' in data and data['Texp_spectrum']['1665'] != []:
-		num_spec = 8
-		Texp_spectra = [	data['Texp_spectrum']['1612'], 
-							data['Texp_spectrum']['1665'],
-							data['Texp_spectrum']['1667'], 
-							data['Texp_spectrum']['1720']]
-		Texp_spectra_rms = [data['Texp_rms']['1612'], data['Texp_rms']['1665'], 
-							data['Texp_rms']['1667'], data['Texp_rms']['1720']]
-		for a in range(4):
-			if np.all(np.diff(vel_axes[a])):
-				vel_axes[a], Texp_spectra[a] = zip(*sorted(zip(vel_axes[a], 
-					Texp_spectra[a])))
-		
-		regridded_Texp_spectra = [np.interp(vel_axes[0], vel_axes[x], 
-			Texp_spectra[x]) for x in range(4)]
-		norm_Texp_spectra = [regridded_Texp_spectra[x] / Texp_spectra_rms[x] 
-			for x in range(4)]	
-		sqrd_Texp_spectra = [norm_Texp_spectra[x]**2 for x in range(4)]
-		summed += sqrd_Texp_spectra[b]
-
-	root_mean_sum = np.sqrt(summed/num_spec)
-
-	return root_mean_sum
-def reducelist(master_list, merge_size = 0.5, group_spacing = 10):
-	'''
-	Merges values in master_list separated by less than merge_size, and groups 
-	features separated by less than group_spacing into blended features. 
-
-	Parameters:
-		master_list - list of velocities
-		merge_size - any velocities separated by less than 'merge_size' will be 
-			merged into one velocity. This is performed in 4 stages, first using 
-			merge_size / 4 so that the closest velocities are merged first. Merged 
-			velocities are replaced by their mean. 
-		group_spacing - any velocities separated by less than 'group_spacing' will 
-			be grouped together so they can be fit as blended features. Smaller 
-			values are likely to prevent the accurate identification of blended 
-			features, while larger values will increase running time.
-	Returns: 
-		list: Nested list of velocities = [[v1], [v2, v3], [v4]] where v1 and v4 are 
-			isolated features that can be fit independently, but v2 and v3 are close 
-			enough in velocity that they must be fit together as a blended feature.
-	'''
-	try:
-		master_list = sorted([val for sublist in master_list for val in 
-			sublist])
-	except TypeError:
-		pass
-
-	master_list = np.array(master_list)
-	
-	# Step 1: merge based on merge_size
-	new_merge_list = np.sort(master_list.flatten())
-
-	for merge in [merge_size / 4, 2 * merge_size / 4, 3 * merge_size / 4, 
-		merge_size]:
-		new_merge_list = mergefeatures(new_merge_list, merge, 'merge')
-	
-	# Step 2: identify comps likely to overlap to be fit together
-	final_merge_list = mergefeatures(new_merge_list, group_spacing, 'group')
-
-	return final_merge_list
-def mergefeatures(master_list, size, action):
-	'''
-	Does the work for ReduceList.
-
-	Parameters:
-		master_list (array-like): list of velocities
-		size (float): Distance in x-axis units (i.e. km/s) for the given action
-		action (str): Action to perform: 'merge' or 'group'
-	Returns: 
-		array-like: Nested list of velocities = [[v1], [v2, v3], [v4]] where v1 and v4 are 
-			isolated features that can be fit independently, but v2 and v3 are close 
-			enough in velocity that they must be fit together as a blended feature.
-	'''	
-	new_merge_list = []
-	check = 0
-	while check < len(master_list):
-		skip = 1
-		single = True
-
-		if action == 'merge':
-			while (check + skip < len(master_list) and 
-				master_list[check + skip] - master_list[check] < size):
-				skip += 1
-				single = False
-			if single == True:
-				new_merge_list = np.append(new_merge_list, master_list[check])
-			else:
-				new_merge_list = np.append(new_merge_list, 
-					mean(master_list[check:check + skip]))
-			check += skip
-
-		elif action == 'group':
-			while (check + skip < len(master_list) and 
-				master_list[check + skip] - 
-				master_list[check + skip - 1] < size):
-				skip += 1
-			new_merge_list.append(master_list[check:check + skip].tolist())
-			check += skip
-		else:
-			print('Error defining action in MergeFeatures')
-
-	return new_merge_list
 #              |
 #              |
 #            \ | /
@@ -556,15 +366,17 @@ def mergefeatures(master_list, size, action):
 #            \ | /
 #             \|/
 #              V
-def placegaussians(data, Bayes_threshold = 10, quiet = False, best_result = 'median_actual'): 
+
+def placegaussians(full_data, Bayes_threshold, quiet, best_result, N_range, 
+	seed, extra_gaussians,lfwhm_mean=None,lfwhm_sig=None): 
 	'''
 	Manages the process of placing and evaluating gaussian features. 
 
 	Parameters:
 		data (dict): observed spectra and other observed quantities (see 
 			Main function)
-	Keyword Arguments:
-		Bayes_threshold (float): Bayes Factor required for a model to be preferred
+		Bayes_threshold (float): Bayes Factor required for a model to be 
+			preferred
 		quiet (boolean): Whether or not to print outputs to terminal
 		best_result (str): Which result from the markov chain is to be reported
 			as the best result 'median', 'median_actual', 'max' (note, all are 
@@ -575,74 +387,71 @@ def placegaussians(data, Bayes_threshold = 10, quiet = False, best_result = 'med
 			here to that of the actual medians, returns the one with better 
 			lnprob, and 'max' returns the set of parameters with the highest 
 			lnprob.
+		N_range (tuple): range of log column density expected. Values in this 
+			range will have a flat prior, the prior for values outside it will 
+			drop off exponentially.
 	Returns:
 		array: Full list of accepted parameters with upper and lower bounds of
-			credibile intervals. Format: [[1min, 1best, 1max], [2min, 2best, 2max],...] for 
-			parameters 1, 2, etc.
+			credibile intervals. Format: [[1min, 1best, 1max], [2min, 2best, 
+			2max],...] for parameters 1, 2, etc.
 	'''
+	
 	accepted_full = []
-	total_num_gauss = 0
-	plot_num = 0
-	for vel_range in data['sig_vel_ranges']:
+	for vel_range in full_data['sig_vel_ranges']:
 		last_accepted_full = []
 		[min_vel, max_vel] = vel_range
-		data = trimdata(data, min_vel, max_vel)
-		if 'Texp_spectrum' in data and data['Texp_spectrum']['1665'] != []:
-			N_ranges = NrangetauTexp(data)
-			data['N_ranges'] = N_ranges
+		data = trimdata(full_data, min_vel, max_vel)
 		num_gauss = 1
 		keep_going = True
 		extra = 0
 		null_evidence = nullevidence(data)
+		print(str([full_data['source_name'],vel_range,null_evidence]))
 		prev_evidence = null_evidence
 		evidences = [prev_evidence]
-		if not quiet:
-			print(data['source_name'] + '\t' + str(vel_range) + '\t' + 
-				str(null_evidence))
-
 		while keep_going == True:
 			if data['misc'] != None:
-				nwalkers = int(20 * len(data['misc']) * num_gauss) 
+				nwalkers = int(40 * len(data['misc']) * num_gauss) 
 				# in case 'misc' is big
 			else:
-				nwalkers = 30 * num_gauss
-			p0 = p0gen(vel_range, num_gauss, data, nwalkers)
-			(chain, lnprob_) = sampleposterior(	data = data, 
-										num_gauss = num_gauss, 
-										p0 = p0, 
-										vel_range = vel_range,
-										accepted = accepted_full, 
-										nwalkers = nwalkers)
-			if len(chain) != 0:
-				(current_full, current_evidence) = bestparams(chain, lnprob_, 
-					data, vel_range, num_gauss, quiet = quiet, 
-					best_result = best_result)
-				plot_num += 1
-				evidences += [current_evidence]
-				if current_evidence - prev_evidence > Bayes_threshold:
-					extra = 0
-					last_accepted_full = current_full
-					prev_evidence = current_evidence
-					num_gauss += 1
-					total_num_gauss += 1
-				elif extra > 3 or current_evidence - prev_evidence < -1e4:
+				nwalkers = 60 * num_gauss
+			# generate p0
+			p0 = p0gen(vel_range,num_gauss,data,nwalkers,N_range,
+				seed)
+			if p0 != []: # assuming p0 didn't fail:
+				(chain, lnprob_) = sampleposterior(data,num_gauss,p0,vel_range,
+					nwalkers,seed,accepted_full,N_range)
+				if len(chain) != 0: # assuming sampleposterior didn't fail:
+					(current_full, current_evidence) = bestparams(chain,
+						lnprob_,data,vel_range,num_gauss,quiet,best_result,
+						N_range,lfwhm_mean,lfwhm_sig)
+					evidences += [current_evidence]
+					# if current is better than previous
+					if current_evidence - prev_evidence > np.log10(Bayes_threshold):
+						extra = 0
+						last_accepted_full = current_full
+						prev_evidence = current_evidence
+						num_gauss += 1
+					elif extra <= extra_gaussians: # if current isn't better, try some more
+						prev_evidence = current_evidence
+						extra += 1
+						num_gauss += 1
+					else:
+						keep_going = False
+				else: # sampleposterior failed
 					keep_going = False
-				else:
-					extra += 1 # This needs to be tested
-					num_gauss += 1
-			else:
-				nwalkers = 30 * num_gauss
-				p0 = p0gen(vel_range, num_gauss, data, nwalkers)
-				(chain, lnprob_) = sampleposterior(	data = data, 
-										num_gauss = num_gauss, 
-										p0 = p0, 
-										vel_range = [min_vel, max_vel],  
-										accepted = accepted_full, 
-										nwalkers = nwalkers)
-
-				if len(chain) == 0:
-					# print('Process failed again. Moving on.')
+			else: # try one more time
+				p0 = p0gen(vel_range, num_gauss, data, nwalkers,N_range,
+					seed)
+				if p0 != []:
+					(chain, lnprob_) = sampleposterior(data,num_gauss,p0,
+						vel_range,nwalkers,seed,accepted_full,N_range)
+					if len(chain) == 0: # sampleposterior failed
+						keep_going = False
+				else: # p0 failed a second time
 					keep_going = False
+		if not quiet:
+			print(data['source_name'] + '\tvelocity range:\t' + str(vel_range) + '\tevidences:\t' + 
+				str(evidences))
 		accepted_full = list(itertools.chain(accepted_full, 
 			last_accepted_full))
 	return accepted_full
@@ -660,8 +469,6 @@ def trimdata(data, min_vel, max_vel):
 		dict: Dictionary containing trimmed spectra
 	'''
 	data_temp = copy.deepcopy(data)
-	data_temp['interesting_vel'] = [x for x in data_temp['interesting_vel'] 
-		if x >= min_vel and x <= max_vel]
 
 	if data['misc'] != None:
 		misc_data = data['misc']
@@ -683,9 +490,6 @@ def trimdata(data, min_vel, max_vel):
 			if 'Texp_spectrum' in data and data['Texp_spectrum']['1665'] != []:
 				Texp = np.array(data_temp['Texp_spectrum'][f])
 
-			min_vel -= 10.
-			max_vel += 10.
-
 			mini = np.amin([np.argmin(np.abs(vel - min_vel)), 
 				np.argmin(np.abs(vel - max_vel))])
 			maxi = np.amax([np.argmin(np.abs(vel - min_vel)), 
@@ -698,7 +502,6 @@ def trimdata(data, min_vel, max_vel):
 				data_temp['Texp_spectrum'][f] = Texp[mini:maxi + 1]
 
 	return data_temp
-# Find null evidence
 def nullevidence(data): 
 	'''
 	Calculates the evidence of the null model: a flat spectrum.
@@ -709,30 +512,31 @@ def nullevidence(data):
 		float: Natural log of the evidence of the null model.
 	'''
 	lnllh = 0
-	if data['misc'] != None:
-		for spec in range(len(data['misc'])):
-			model = np.zeros(len(data['misc'][0][0]))
+	# if data['misc'] != None:
+	# 	for spec in range(len(data['misc'])):
+	# 		model = np.zeros(len(data['misc'][0][0]))
 
-			lnllh = lnlikelihood(model, data['misc'][0][1], 
-				findrms(data['misc'][0][1]))
+	# 		lnllh = lnlikelihood(model, data['misc'][0][1], 
+	# 			findrms(data['misc'][0][1]))
 
-			lnllh += lnllh
-	else:
-		for f in ['1612','1665','1667','1720']:
+	# 		lnllh += lnllh
+	# else:
+	for f in ['1612','1665','1667','1720']:
 
-			model = np.zeros(len(data['tau_spectrum'][f]))
+		model = np.zeros(len(data['tau_spectrum'][f]))
 
-			lnllh_tau = lnlikelihood(model, data['tau_spectrum'][f], 
-				data['tau_rms'][f])
+		lnllh_tau = lnlikelihood(model, data['tau_spectrum'][f], 
+			data['tau_rms'][f])
 
-			lnllh += lnllh_tau
+		lnllh += lnllh_tau
 
-			if 'Texp_spectrum' in data and data['Texp_spectrum']['1665'] != []:
-				lnllh_Texp = lnlikelihood(model, data['Texp_spectrum'][f], 
-					data['Texp_rms'][f])
+		if 'Texp_spectrum' in data and data['Texp_spectrum']['1665'] != []:
+			lnllh_Texp = lnlikelihood(model, data['Texp_spectrum'][f], 
+				data['Texp_rms'][f])
 
-				lnllh += lnllh_Texp
+			lnllh += lnllh_Texp
 	return lnllh	
+# @jit
 def lnlikelihood(model, spectrum, sigma):
 	'''
 	Calculates the likelihood of a spectrum given a model and spectrum noise.
@@ -747,8 +551,8 @@ def lnlikelihood(model, spectrum, sigma):
 	N = len(spectrum)
 	sse = np.sum((np.array(model) - np.array(spectrum))**2.)
 	return -N*np.log(sigma*np.sqrt(2.*np.pi))-(sse/(2.*(sigma**2.)))
-def bestparams(chain, lnprob_, data, vel_range, num_gauss, quiet = False, 
-	best_result = 'median_actual'): # 
+def bestparams(chain, lnprob_, data, vel_range, num_gauss, quiet, best_result,
+	N_range,lfwhm_mean=None,lfwhm_sig=None): # 
 	'''
 	Finds the 'best' of a Markov chain, and the inner 68th quantile range of 
 	each parameter (~+/- 1 sigma range).
@@ -757,8 +561,7 @@ def bestparams(chain, lnprob_, data, vel_range, num_gauss, quiet = False,
 		chain (array-like): flattened markov chain
 		lnprob (array-like): flattened lnprob
 		data (dict): observed spectra and other observed quantities (see 
-		Main function)
-	Keyword Arguments:
+			Main function)
 		quiet (boolean): prevents printing of evidence and results to terminal
 		best_result (str): Which result from the markov chain is to be reported
 			as the best result 'median', 'median_actual', 'max' (note, all are 
@@ -769,12 +572,16 @@ def bestparams(chain, lnprob_, data, vel_range, num_gauss, quiet = False,
 			here to that of the actual medians, returns the one with better 
 			lnprob, and 'max' returns the set of parameters with the highest 
 			lnprob.
+		N_range (tuple): range of log column density expected. Values in this 
+			range will have a flat prior, the prior for values outside it will 
+			drop off exponentially.
 	Returns:
-		tuple: Array of three values for each parameter: lower sigma bound, median, 
-		upper sigma bound, and natural log of the evidence.
+		tuple: Array of three values for each parameter: lower sigma bound, 
+		median, upper sigma bound, and natural log of the evidence.
 	'''
 	
-	if best_result != 'median' and best_result != 'median_actual' and best_result != 'max':
+	if (best_result != 'median' and best_result != 'median_actual' and 
+		best_result != 'max'):
 		print('Warning! \'best_result\' incorrectly set.'+
 			'\nSetting best_result = \'median\'')
 		best_result = 'median'
@@ -811,42 +618,54 @@ def bestparams(chain, lnprob_, data, vel_range, num_gauss, quiet = False,
 	upper = np.percentile(chain,84,axis=0)
 	median = np.percentile(chain,50,axis=0)
 		
-	median_lnprob = lnprob(median, data, vel_range, num_gauss)
+	median_lnprob = lnprob(median, data, vel_range, num_gauss,[],N_range,lfwhm_mean,lfwhm_sig)
 	
-	dmedian = [sum([(x[y]-median[y])**2. for y in range(num_param)]) for x in chain]
+	dmedian = [sum([(x[y]-median[y])**2. for y in range(num_param)]) 
+		for x in chain]
 	median_actual = chain[np.argmin(dmedian)]
 	median_actual_lnprob = lnprob_[np.argmin(dmedian)]
-
-	with np.printoptions(threshold=np.inf):
-		print(np.array(lnprob_))
-		print(np.array(chain))
 
 	[max_lnprob, max_] = [x[-1] for x in zip(*sorted(list(zip(lnprob_,chain)), 
 		key=lambda tup: tup[0]))]
 
-	final_results_median = [[lower[x], median[x], upper[x]] for x in range(num_param)]
+	final_results_median = [[lower[x], median[x], upper[x]] 
+		for x in range(num_param)]
 	if median_actual_lnprob < median_lnprob:
-		final_results_median_actual = [[lower[x], median[x], upper[x]] for x in range(num_param)]		
+		final_results_median_actual = [[lower[x], median[x], upper[x]] 
+			for x in range(num_param)]		
 	else:		
-		final_results_median_actual = [[lower[x], median_actual[x], upper[x]] for x in range(num_param)]
-	final_results_max = [[lower[x], max_[x], upper[x]] for x in range(num_param)]
+		final_results_median_actual = [[lower[x], median_actual[x], upper[x]] 
+			for x in range(num_param)]
+	final_results_max = [[lower[x], max_[x], upper[x]] 
+		for x in range(num_param)]
 
-	if not quiet:
-		print('Evidence and Preliminary results (\'best\' = median):'+'\t'+
-			str(total_evidence)+'\t'+str(final_results_median))
-		print('Evidence and Preliminary results (\'best\' = median_actual):'+'\t'+
-			str(total_evidence)+'\t'+str(final_results_median_actual))
-		print('Evidence and Preliminary results (\'best\' = max):'+'\t'+
-			str(total_evidence)+'\t'+str(final_results_max))
+	# if not quiet:
+	if best_result == 'median':
+		print('Evidence and Preliminary results (\'best\' '+
+			'= median):'+'\t'+str(total_evidence)+'\t'+
+			str(final_results_median))
+	elif best_result == 'median_actual':
+		print('Evidence and Preliminary results (\'best\' '+
+			'= median_actual):'+'\t'+str(total_evidence)+'\t'+
+			str(final_results_median_actual))
+	else:
+		print('Evidence and Preliminary results (\'best\' '+
+			'= max):'+'\t'+str(total_evidence)+'\t'+
+			str(final_results_max))
 
 	if best_result == 'median':
+		# print('source: '+str(data['source_name'])+' vel range: '+str(vel_range)+
+		# 	' num gauss: '+str(num_gauss)+' evidence: '+str(total_evidence))
 		return (final_results_median,total_evidence)
 	elif best_result == 'median_actual':
+		# print('source: '+str(data['source_name'])+' vel range: '+str(vel_range)+
+		# 	' num gauss: '+str(num_gauss)+' evidence: '+str(total_evidence))
 		return (final_results_median_actual,total_evidence)
 	elif best_result == 'max':
+		# print('source: '+str(data['source_name'])+' vel range: '+str(vel_range)+
+		# 	' num gauss: '+str(num_gauss)+' evidence: '+str(total_evidence))
 		return (final_results_max,total_evidence)
-# initial pos for walkers
-def p0gen(vel_range, num_gauss, data, nwalkers):
+def p0gen(vel_range, num_gauss, data, nwalkers, N_range,seed,lfwhm_mean=None,lfwhm_sig=None):
 	'''
 	Generates initial positions of walkers for the MCMC simulation.
 
@@ -855,70 +674,107 @@ def p0gen(vel_range, num_gauss, data, nwalkers):
 		num_gauss (int): number of gaussian components in model
 		data (dict): dictionary of trimmed spectra
 		nwalkers (int): number of walkers
+		N_range (tuple): range of log column density expected. Values in this 
+			range will have a flat prior, the prior for values outside it will 
+			drop off exponentially.
 	Returns:
 		array: Initial positions of all walkers.
 	'''
-	if 'Texp_spectrum' in data and data['Texp_spectrum']['1665'] != []:
-		p0_2 = 0
-		for walker in range(nwalkers):
-			p0_1 = 0
-			for comp in range(num_gauss):
-				p0_0 = [np.random.uniform(np.min(vel_range), 
-					np.max(vel_range)), np.random.uniform(0.1, 5.), 
-					np.random.uniform(np.min(data['N_ranges'][0]), 
-						np.max(data['N_ranges'][0])), 
-					np.random.uniform(np.min(data['N_ranges'][1]), 
-						np.max(data['N_ranges'][1])), 
-					np.random.uniform(np.min(data['N_ranges'][2]), 
-						np.max(data['N_ranges'][2])), 
-					np.random.uniform(np.min(data['N_ranges'][3]), 
-						np.max(data['N_ranges'][3]))]
-				if p0_1 == 0:
-					p0_1 = p0_0
-				else:
-					p0_1 += p0_0
+	trial=0
+	while trial<=10:
+		if 'Texp_spectrum' in data and data['Texp_spectrum']['1665'] != []:
+			# print('Texpp0')
+			p0_to_return=Texpp0(vel_range, num_gauss, nwalkers, N_range,seed)
+		elif data['misc'] != None:
+			# print('miscp0')
+			p0_to_return=miscp0(vel_range, num_gauss, data, nwalkers,seed)
+		else:
+			# print('taup0')
+			p0_to_return=taup0(vel_range, num_gauss, data, nwalkers,seed)
+		
+		if seed != None:
+			np.random.seed(seed=seed)
+		p0_to_return+=0.1*np.random.randn(len(p0_to_return),len(p0_to_return[0]))
+		p0_to_return=checkp0(p0_to_return,num_gauss,data,vel_range,N_range,seed,lfwhm_mean,lfwhm_sig)
+		
+		if p0_to_return != []:
+			return p0_to_return
+		else:
+			if seed != None:
+				seed+=1
+		trial+=1
+	return []
+def Texpp0(vel_range, num_gauss, nwalkers, N_range,seed):
+	# parameters will be v, fwhm, N1, 1/Tex_1612, 1/Tex_1665, 1/Tex_1667
+	p0_2 = 0
+	if seed != None:
+		np.random.seed(seed=seed)
+	vel_guesses = [sorted([np.random.uniform(vel_range[0],vel_range[1])
+				for x in range(num_gauss)]) for y in range(nwalkers)]
+	for walker in range(nwalkers):
+		p0_1 = 0
+		for comp in range(num_gauss):
+			# vel, FWHM, N
+			if seed != None:
+				np.random.seed(seed=seed)
+			p0_0 = [vel_guesses[walker][comp],np.random.uniform(-1, 1),
+				np.random.uniform(N_range[0],N_range[1])] + list(
+					0.1*np.random.randn(3))
 
-			if p0_2 == 0:
-				p0_2 = [p0_1]
+			if p0_1 == 0:
+				p0_1 = p0_0
 			else:
-				p0_2 += [p0_1]
+				p0_1 += p0_0
 
-		return p0_2
-	elif data['misc'] != None:
-		num_spec = len(data['misc'])
-		p0_2 = 0
-		for walker in range(nwalkers):
-			p0_1 = 0
-			for comp in range(num_gauss):
-				p0_0 = [np.random.uniform(np.min(vel_range), 
-					np.max(vel_range)), np.random.uniform(0.1, 5.)]
-				for spec in range(num_spec):
-					p0_0 += [np.random.uniform(
-						np.min(data['misc'][spec][1]), 
-						np.max(data['misc'][spec][1]))]
-				if p0_1 == 0:
-					p0_1 = p0_0
-				else:
-					p0_1 += p0_0
-
-			if p0_2 == 0:
-				p0_2 = [p0_1]
+		if p0_2 == 0:
+			p0_2 = [p0_1]
+		else:
+			p0_2 += [p0_1]
+	return p0_2
+def miscp0(vel_range, num_gauss, data, nwalkers,seed):
+	num_spec = len(data['misc'])
+	p0_2 = 0
+	if seed != None:
+		np.random.seed(seed=seed)
+	vel_guesses = [sorted([np.random.uniform(vel_range[0],vel_range[1])
+				for x in range(num_gauss)]) for y in range(nwalkers)]
+	for walker in range(nwalkers):
+		p0_1 = 0
+		for comp in range(num_gauss):
+			if seed != None:
+				np.random.seed(seed=seed)
+			p0_0 = [vel_guesses[walker][comp],np.random.uniform(-1, 1)]
+			for spec in range(num_spec):
+				if seed != None:
+					np.random.seed(seed=seed)
+				p0_0 += [np.random.uniform(
+					np.min(data['misc'][spec][1]), 
+					np.max(data['misc'][spec][1]))]
+			if p0_1 == 0:
+				p0_1 = p0_0
 			else:
-				p0_2 += [p0_1]
-		return p0_2
-	else:
-		# only these are subject to the tau priors, so should be ok
-		(tau_1612_range, tau_1665_range, tau_1667_range, tau_1720_range) = (
-			[-2 * np.abs(np.amin(data['tau_spectrum']['1612'])), 
-				2 * np.abs(np.amax(data['tau_spectrum']['1612']))], 
-			[-1.5 * np.abs(np.amin(data['tau_spectrum']['1665'])), 
-				1.5 * np.abs(np.amax(data['tau_spectrum']['1665']))], 
-			[-1.5 * np.abs(np.amin(data['tau_spectrum']['1667'])), 
-				1.5 * np.abs(np.amax(data['tau_spectrum']['1667']))], 
-			[-2 * np.abs(np.amin(data['tau_spectrum']['1720'])), 
-				2 * np.abs(np.amax(data['tau_spectrum']['1720']))]) 
+				p0_1 += p0_0
 
-		# define axes for meshgrid
+		if p0_2 == 0:
+			p0_2 = [p0_1]
+		else:
+			p0_2 += [p0_1]
+	return p0_2
+def taup0(vel_range, num_gauss, data, nwalkers,seed):
+	# only these are subject to the tau priors, so should be ok
+	(tau_1612_range, tau_1665_range, tau_1667_range, tau_1720_range) = (
+		[-2 * np.abs(np.nanmin(data['tau_spectrum']['1612'])), 
+			2 * np.abs(np.nanmax(data['tau_spectrum']['1612']))], 
+		[-1.5 * np.abs(np.nanmin(data['tau_spectrum']['1665'])), 
+			1.5 * np.abs(np.nanmax(data['tau_spectrum']['1665']))], 
+		[-1.5 * np.abs(np.nanmin(data['tau_spectrum']['1667'])), 
+			1.5 * np.abs(np.nanmax(data['tau_spectrum']['1667']))], 
+		[-2 * np.abs(np.nanmin(data['tau_spectrum']['1720'])), 
+			2 * np.abs(np.nanmax(data['tau_spectrum']['1720']))]) 
+
+	# define axes for meshgrid
+	if np.all([tau_1612_range, tau_1665_range, tau_1667_range, tau_1720_range]!=np.NaN):
+
 		t1612 = np.arange(tau_1612_range[0], 
 			tau_1612_range[1], (tau_1612_range[1] - 
 			tau_1612_range[0]+1e-10)/(100*num_gauss**(1./3.)))
@@ -937,30 +793,76 @@ def p0gen(vel_range, num_gauss, data, nwalkers):
 			(t1665 < tau_1665_range[1]))
 
 		if len(good_values) >= num_gauss * nwalkers:
+			if seed != None:
+				np.random.seed(seed=seed)
 			p0_indices = good_values[np.random.choice(
-				np.arange(len(good_values)), nwalkers * num_gauss, 
+				np.arange(len(good_values)),nwalkers * num_gauss, 
 					replace = False)]
-		else:
+		elif len(good_values)!=0:
+			if seed != None:
+				np.random.seed(seed=seed)
 			p0_indices = good_values[np.random.choice(
-				np.arange(len(good_values)), nwalkers * num_gauss, 
-					replace = True)]
-
+				np.arange(len(good_values)),nwalkers*num_gauss,replace=True)]
+		else:
+			p0_indices=np.random.choice(np.arange(len(t1665)),nwalkers*num_gauss,
+					replace=False)
+		if seed != None:
+			np.random.seed(seed=seed)
 		vel_guesses = [sorted([np.random.uniform(vel_range[0], vel_range[1]) 
 			for x in range(num_gauss)]) for y in range(nwalkers)]
 		for comp in range(num_gauss):
+			if seed != None:
+				np.random.seed(seed=seed)
 			p0_comp = [[vel_guesses[x][comp], 
-				np.random.uniform(0.1, 5), 
-					t1612[p0_indices[comp*nwalkers + x][0]],
-					t1667[p0_indices[comp*nwalkers + x][1]],
-					t1720[p0_indices[comp*nwalkers + x][2]]] 
+				np.random.uniform(-1, 1), 
+					t1612[p0_indices[int(comp*nwalkers + x)][0]],
+					t1667[p0_indices[int(comp*nwalkers + x)][1]],
+					t1720[p0_indices[int(comp*nwalkers + x)][2]]] 
 				for x in range(nwalkers)]
 			if comp == 0:
 				p0 = p0_comp
 			else:
 				p0 = np.concatenate((p0, p0_comp), axis = 1)
 		return p0
-# converts between tau, Tex, Texp, N
-def Texp(tau, Tbg, Tex): 
+	return None
+def checkp0(p0,num_gauss,data,vel_range,N_range,seed,lfwhm_mean=None,lfwhm_sig=None):
+	nwalkers=len(p0)
+	probs=[lnprob(x,data,vel_range,num_gauss,[],N_range,lfwhm_mean,lfwhm_sig) for x in p0]
+	if probs.count(-np.inf) == nwalkers:
+		# print('all p0 return -np.inf :(')
+		# print('p0:')
+		# with np.printoptions(threshold=np.inf):
+		# 	print(p0)
+		return []
+	elif probs.count(-np.inf) == 0:
+		return p0
+
+	p0=[p0[x] for x in range(nwalkers) if probs[x]!=-np.inf]
+	iterations=0
+	while len(p0)<nwalkers and iterations < 1e4:
+		iterations+=1
+		needed = nwalkers-len(p0)
+		if needed >len(p0):
+			if seed != None:
+				np.random.seed(seed=seed)
+			new_ind=np.random.choice(range(len(p0)), needed, replace = True)
+		else:
+			if seed != None:
+				np.random.seed(seed=seed)
+			new_ind=np.random.choice(range(len(p0)), needed, replace = False)
+		new=[p0[x] for x in new_ind]
+		if seed != None:
+			np.random.seed(seed=seed)
+		new=[[x*(0.01*(np.random.randn()) + 1) for x in y] for y in new]
+		new_probs=[lnprob(x,data,vel_range,num_gauss,[],N_range,lfwhm_mean,lfwhm_sig) for x in new]
+		new=[new[x] for x in range(len(new)) if new_probs[x]!=-np.inf]
+		p0+=new
+	if iterations >= 1e4:
+		print('Error! checkp0 stopped because of too many iterations. Check p0gen.')
+		return []
+	return p0
+# @jit
+def texp(tau, Tbg, Tex): 
 	'''
 	Calculates the expected brightness temperature given the excitation 
 	temperature, background brightness temperature and optical depth.
@@ -972,8 +874,8 @@ def Texp(tau, Tbg, Tex):
 	Returns:
 		float: Expected brightness temperature in kelvin
 	'''
-	Texp = (Tex - Tbg) * (1 - np.exp(-tau))
-	return Texp
+	return (Tex - Tbg) * (1 - np.exp(-tau))
+# @jit
 def tau3(tau_1612=None, tau_1665=None, tau_1667=None, tau_1720=None): 
 	'''
 	Applies the OH optical depth sum rule:
@@ -1009,202 +911,101 @@ def tau3(tau_1612=None, tau_1665=None, tau_1667=None, tau_1720=None):
 	else: # can't do anything
 		print('Error, at least 3 values of tau needed to apply the sum rule.')
 		return None
-def tauTexN(logN1, logN2, logN3, logN4, fwhm): 
+def Tex3(Tex_1612=None, Tex_1665=None, Tex_1667=None, Tex_1720=None): 
+	'''
+	Applies the OH excitation temperature sum rule:
+		nu_1612/Tex_1612+nu_1720/Tex_1720 = nu_1665/Tex_1665+nu_1667/Tex_1667
+	to a set of 3 excitation temperatures to find the fourth.
+
+	Parameters:
+		Tex_[freq] (float): Excitation temperature of OH ground 
+			rotational state transition
+	Returns:
+		list: List of all four excitation temperatures
+	'''
+	[nu_1612,nu_1665,nu_1667,nu_1720]=[1.612231e9,
+		1.665402e9,1.667359e9,1.720530e9]
+	Tex_list = np.array([Tex_1612, Tex_1665, Tex_1667, Tex_1720])
+	if (Tex_list == None).sum() == 1: # only one is left blank, can proceed
+		if Tex_1612 == None:
+			Tex_1612=nu_1612/((nu_1665/Tex_1665)+(nu_1667/Tex_1667)-
+				(nu_1720/Tex_1720))
+		elif Tex_1665 == None:
+			Tex_1665=nu_1665/((nu_1612/Tex_1612)+(nu_1720/Tex_1720)-
+				(nu_1667/Tex_1667))
+		elif Tex_1667 == None:
+			Tex_1667=nu_1667/((nu_1612/Tex_1612)+(nu_1720/Tex_1720)-
+				(nu_1665/Tex_1665))
+		elif Tex_1720 == None:
+			Tex_1720=nu_1720/((nu_1665/Tex_1665)+(nu_1667/Tex_1667)-
+				(nu_1612/Tex_1612))
+
+		return np.array([Tex_1612, Tex_1665, Tex_1667, Tex_1720])
+	else: # can't do anything
+		print('Error, at least 3 values of Tex needed to apply the sum rule.')
+		return None
+# @jit
+def tauTexN(logN1,invTex_1612,invTex_1665,invTex_1667,logfwhm): 
 	'''
 	Calculates optical depths and excitation temperatures from the column 
 	densities of the four ground rotaitonal state levels of OH.
 
 	Parameters:
-		logN[1,2,3,4] (float): log (base 10) of the column densities of the four 
-			ground rotational state levels of OH.
-		fwhm (float): Full width at half-maximum of the gaussian feature (km/sec)
+		logN1 (float): log (base 10) of the column density of the 
+			lowest ground rotational state level of OH.
+		invTex_[1612,1665,1667] (float): 1/Tex for the 1612, 1665 and 1667 MHz 
+			lines of OH.
+		fwhm (float): Full width at half-maximum of the gaussian feature 
+			(km/sec)
 	Returns:
-		list: [tau_1612, tau_1665, tau_1667, tau_1720, Tex_1612, Tex_1665, Tex_1667, Tex_1720]
+		list: [tau_1612, tau_1665, tau_1667, tau_1720, Tex_1612, Tex_1665, 
+		Tex_1667, Tex_1720]
 	'''
-	con = {
-	'rest_freq': {'1612': 1612231000., '1665': 1665402000., 
-		'1667': 1667359000., '1720': 1720530000.},
-	'gu': {'1612': 3., '1665': 3., '1667': 5., '1720': 5.},
-	'gl': {'1612': 5., '1665': 3., '1667': 5., '1720': 3.},
-	'logNu': {'1612': logN2, '1665': logN2, '1667': logN1, '1720': logN1},
-	'logNl': {'1612': logN3, '1665': logN4, '1667': logN3, '1720': logN4}}
-	h = 6.62607004E-27
-	k = 1.38064852E-16
-	# calculating ln(Nlgu/Nugl) separately
-	lnNg_1612 = (np.log(10.)*(con['logNl']['1612']-con['logNu']['1612'])+
-		np.log(con['gu']['1612'])-np.log(con['gl']['1612']))
-	lnNg_1665 = np.log(10.)*(con['logNl']['1665']-con['logNu']['1665'])
-	lnNg_1667 = np.log(10.)*(con['logNl']['1667']-con['logNu']['1667'])
-	lnNg_1720 = (np.log(10.)*(con['logNl']['1720']-con['logNu']['1720'])+
-		np.log(con['gu']['1720'])-np.log(con['gl']['1720']))
+	fwhm=10**logfwhm
+	c1 = [0.6,1,1,5./3.]
+	c2 = [-0.0773748694136189,-0.0799266744475076,-0.0800205956160266,-0.0825724006499154]
+	c3 = [4130292895.686540,799525863.354490,739481982.512962,6449426425.933550]
 
-	# compute Tex
-	Tex_1612 = (h*con['rest_freq']['1612'])/(k*lnNg_1612)
-	Tex_1665 = (h*con['rest_freq']['1665'])/(k*lnNg_1665)
-	Tex_1667 = (h*con['rest_freq']['1667'])/(k*lnNg_1667)
-	Tex_1720 = (h*con['rest_freq']['1720'])/(k*lnNg_1720)
+	logN3=np.log10(c1[1]*np.exp(c2[1]*invTex_1665))+logN1
+	logN2=logN3-np.log10(c1[0]*np.exp(c2[0]*invTex_1612))
+	logN4=np.log10(c1[2]*np.exp(c2[2]*invTex_1667))+logN2
 
-	# coefficients
-	[coeff_1612, coeff_1665, coeff_1667, coeff_1720] = [6883817863.273635, 
-		799525441.7995559, 739481592.616534, 3869653815.260256]
-	# where:
-	# coeff_1612 = ((8.*np.pi*k*np.sqrt(np.pi)*con['gl']['1612']*
-	# 	con['rest_freq']['1612']**2)/(con['gu']['1612']*con['Aul']['1612']*
-	# 	(c**3)*h*2.*np.sqrt(np.log(2.)))), etc.
-	# 'Aul': {'1612': 1.302E-11, '1665': 7.177E-11, '1667': 7.778E-11, 
-	# 	'1720': 9.496E-12}
-	# c = 2.99792458E+10
+	Tex_1612 = 1/invTex_1612
+	Tex_1665 = 1/invTex_1665
+	Tex_1667 = 1/invTex_1667
+	Tex_1720 = c2[3]/(np.log((10**logN4)/(c1[3]*(10**logN1))))
 
-	# compute peak tau
-	tau_1612 = (10.**con['logNl']['1612'])/(coeff_1612*Tex_1612*fwhm*(10**5))
-	tau_1665 = (10.**con['logNl']['1665'])/(coeff_1665*Tex_1665*fwhm*(10**5))
-	tau_1667 = (10.**con['logNl']['1667'])/(coeff_1667*Tex_1667*fwhm*(10**5))
-	tau_1720 = (10.**con['logNl']['1720'])/(coeff_1720*Tex_1720*fwhm*(10**5))
+	tau_1612 = (c1[0]/c3[0])*(10**logN2)/(Tex_1612*fwhm*1e5)#convert to cm/s
+	tau_1665 = (c1[1]/c3[1])*(10**logN1)/(Tex_1665*fwhm*1e5)#convert to cm/s
+	tau_1667 = (c1[2]/c3[2])*(10**logN2)/(Tex_1667*fwhm*1e5)#convert to cm/s
+	tau_1720 = (c1[3]/c3[3])*(10**logN1)/(Tex_1720*fwhm*1e5)#convert to cm/s
 
 	return [tau_1612, tau_1665, tau_1667, tau_1720, 
 			Tex_1612, Tex_1665, Tex_1667, Tex_1720]
-def NtauTex(tau_1612, tau_1665, tau_1667, tau_1720, 
-	Tex_1612, Tex_1665, Tex_1667, Tex_1720, fwhm): 
-	'''
-	Determines column densities of the 4 OH ground state levels from optical 
-		depth and excitation temperature of the four ground state transitions:	
-
-	Parameters:
-		tau_[freq] (float): optical depth.
-		Tex_[freq] (float): excitation temperature (K)
-		fwhm (float): full width at half-maximum (km/s)
-
-	Returns:
-		list: log (base 10) of the column densities of the four ground rotational state levels of OH.
-	'''
-	N3 = Tex_1667*tau_1667*fwhm*7.39481592616533E+13
-	N1 = N3*(np.exp(-0.0800206378074005/Tex_1667))
-	N2 = N3*((3/5)*np.exp(-0.0773749102100167/Tex_1612))
-	N4 = N1/((5/3)*np.exp(-0.0825724441867449/Tex_1720))
-
-	return [np.log10(N1), np.log10(N2), np.log10(N3), np.log10(N4)]
-def NrangetauTexp(data): 
-	'''
-	Determines the ranges of possible column densities that correspond to the 
-	range of tau and Texp in the data.	
-
-	Parameters:
-		data (dict): observed spectra and other observed quantities. 
-			See 'Main'	
-	Returns:
-		array-like: 2D array with [[min log(10) N1, max log(10) N1], ...]
-	'''
-	# relevant constants (cgs):
-	con = {
-	'rest_freq': {'1612': 1612231000., '1665': 1665402000., 
-		'1667': 1667359000., '1720': 1720530000.},
-	'gu': {'1612': 3., '1665': 3., '1667': 5., '1720': 5.},
-	'gl': {'1612': 5., '1665': 3., '1667': 5., '1720': 3.}}
-	h = 6.62607004E-27
-	k = 1.38064852E-16
-
-	[coeff_1612, coeff_1665, coeff_1667, coeff_1720] = [6883817863.273635, 
-		799525441.7995559, 739481592.616534, 3869653815.260256]
-	# where:
-	# coeff_1612 = ((8.*np.pi*k*np.sqrt(np.pi)*con['gl']['1612']*
-	# 	con['rest_freq']['1612']**2)/(con['gu']['1612']*con['Aul']['1612']*
-	# 	(c**3)*h*2.*np.sqrt(np.log(2.)))), etc.
-	# 'Aul': {'1612': 1.302E-11, '1665': 7.177E-11, '1667': 7.778E-11, 
-	# 	'1720': 9.496E-12}
-	# c = 2.99792458E+10
-
-	Tex_1612 = data['Tbg']['1612']+(np.array(data[
-		'Texp_spectrum']['1612'])/(1.-np.exp(-np.array(data[
-		'tau_spectrum']['1612']))))
-	Tex_1665 = data['Tbg']['1665']+(np.array(data[
-		'Texp_spectrum']['1665'])/(1.-np.exp(-np.array(data[
-		'tau_spectrum']['1665']))))
-	Tex_1667 = data['Tbg']['1667']+(np.array(data[
-		'Texp_spectrum']['1667'])/(1.-np.exp(-np.array(data[
-		'tau_spectrum']['1667']))))
-	Tex_1720 = data['Tbg']['1720']+(np.array(data[
-		'Texp_spectrum']['1720'])/(1.-np.exp(-np.array(data[
-		'tau_spectrum']['1720']))))
-	
-	logN3_1 = np.abs(np.log10(np.abs(coeff_1667*(10**5)*10*np.array(
-		data['tau_spectrum']['1667'])*(Tex_1667))))
-	logN3_2 = np.abs(np.log10(np.abs(coeff_1612*(10**5)*10*np.array(
-		data['tau_spectrum']['1612'])*(Tex_1612))))
-	logN3_3 = np.abs(np.log10(np.abs(coeff_1667*(10**5)*0.1*np.array(
-		data['tau_spectrum']['1667'])*(Tex_1667))))
-	logN3_4 = np.abs(np.log10(np.abs(coeff_1612*(10**5)*0.1*np.array(
-		data['tau_spectrum']['1612'])*(Tex_1612))))
-	logN4_1 = np.abs(np.log10(np.abs(coeff_1665*(10**5)*10*np.array(
-		data['tau_spectrum']['1665'])*(Tex_1665))))
-	logN4_2 = np.abs(np.log10(np.abs(coeff_1720*(10**5)*10*np.array(
-		data['tau_spectrum']['1720'])*(Tex_1720))))
-	logN4_3 = np.abs(np.log10(np.abs(coeff_1665*(10**5)*0.1*np.array(
-		data['tau_spectrum']['1665'])*(Tex_1665))))
-	logN4_4 = np.abs(np.log10(np.abs(coeff_1720*(10**5)*0.1*np.array(
-		data['tau_spectrum']['1720'])*(Tex_1720))))
-
-	logN3_min = np.nanmin([np.nanmin(logN3_1), np.nanmin(logN3_2), 
-		np.nanmin(logN3_3), np.nanmin(logN3_4)])
-	logN3_max = np.nanmax([np.nanmax(logN3_1), np.nanmax(logN3_2), 
-		np.nanmax(logN3_3), np.nanmax(logN3_4)])
-
-	logN4_min = np.nanmin([np.nanmin(logN4_1), np.nanmin(logN4_2), 
-		np.nanmin(logN4_3), np.nanmin(logN4_4)])
-	logN4_max = np.nanmax([np.nanmax(logN4_1), np.nanmax(logN4_2), 
-		np.nanmax(logN4_3), np.nanmax(logN4_4)])
-
-
-	logN1_1 = np.log10((10.**logN3_min)*(5./5.)*np.exp(-h*
-			con['rest_freq']['1667']/(k*Tex_1667)))
-	logN1_2 = np.log10((10.**logN4_min)*(5./3.)*np.exp(-h*
-			con['rest_freq']['1720']/(k*Tex_1720)))
-	logN1_3 = np.log10((10.**logN3_max)*(5./5.)*np.exp(-h*
-			con['rest_freq']['1667']/(k*Tex_1667)))
-	logN1_4 = np.log10((10.**logN4_max)*(5./3.)*np.exp(-h*
-			con['rest_freq']['1720']/(k*Tex_1720)))
-	logN2_1 = np.log10((10.**logN4_min)*(3./3.)*np.exp(-h*
-			con['rest_freq']['1665']/(k*Tex_1665)))
-	logN2_2 = np.log10((10.**logN3_min)*(3./5.)*np.exp(-h*
-			con['rest_freq']['1612']/(k*Tex_1612)))
-	logN2_3 = np.log10((10.**logN4_max)*(3./3.)*np.exp(-h*
-			con['rest_freq']['1665']/(k*Tex_1665)))
-	logN2_4 = np.log10((10.**logN3_max)*(3./5.)*np.exp(-h*
-			con['rest_freq']['1612']/(k*Tex_1612)))
-
-	logN1_min = np.nanmin([np.nanmin(logN1_1), np.nanmin(logN1_2), 
-		np.nanmin(logN1_3), np.nanmin(logN1_4)])
-	logN1_max = np.nanmax([np.nanmax(logN1_1), np.nanmax(logN1_2), 
-		np.nanmax(logN1_3), np.nanmax(logN1_4)])
-
-	logN2_min = np.nanmin([np.nanmin(logN2_1), np.nanmin(logN2_2), 
-		np.nanmin(logN2_3), np.nanmin(logN2_4)])
-	logN2_max = np.nanmax([np.nanmax(logN2_1), np.nanmax(logN2_2), 
-		np.nanmax(logN2_3), np.nanmax(logN2_4)])	
-
-	return [[logN1_min, logN1_max], [logN2_min, logN2_max], 
-		[logN3_min, logN3_max], [logN4_min, logN4_max]]
 # makes/plots model from params
 def makemodel(params, data, num_gauss, accepted_params = []): 
 	'''
 	Generates model spectra from input parameters.	
 
 	Parameters:
-		params (array-like): parameters for the models. If 'data' contains tau and Texp 
-			spectra, these will be [mean vel(1), fwhm(1), N1(1), N2(1), N3(1), 
-			N4(1), ...(num_gauss)] for 'num_gauss' gaussian components. If 'data'
-			contains only tau spectra, these will be [mean vel(1), fwhm(1), 
-			tau_1(1), tau_2(1), tau_3(1), tau_4(1), ...(num_gauss)]. If 'misc' 
-			spectra are provided, these will be [mean vel(1), fwhm(1), h1(1), 
-			h2(1), ... hN(1), ... hN(num_gauss)] for N provided spectra and 
-			'num_gauss' gaussian components.
+		params (array-like): parameters for the models. If 'data' contains tau 
+			and Texp spectra, these will be [mean vel(1), fwhm(1), logN1(1), 
+			1/Tex_1612(1), 1/Tex_1665(1), 1/Tex_1667(1), ...(num_gauss)] for 
+			'num_gauss' gaussian components. If 'data'contains only tau 
+			spectra, these will be [mean vel(1), fwhm(1), tau_1(1), tau_2(1), 
+			tau_3(1), tau_4(1), ...(num_gauss)]. If 'misc' spectra are 
+			provided, these will be [mean vel(1), fwhm(1), h1(1), h2(1), ... 
+			hn(1), ... hn(num_gauss)] for n provided spectra and 'num_gauss' 
+			gaussian components.
 		data (dict): observed spectra and other observed quantities (see 
 			Main function)
 		num_gauss (int): number of gaussian components.	
 	Keyword Arguments:
-		accepted_params (array-like): parameters of any previously accepted components 
-			i.e. from another velocity range. The same form as 'params'. These 
-			are included to account for the tail of a neighbouring gaussian that 
-			may influence the current velocity range.	
+		accepted_params (array-like): parameters of any previously accepted 
+			components i.e. from another velocity range. The same form as 
+			'params'. These are included to account for the tail of a 
+			neighbouring gaussian that may influence the current velocity 
+			range.	
 	Returns:
 		tuple: Tuple of model spectra. If 'data' contains tau and Texp 
 			spectra, these will be (tau_1612, tau_1665, tau_1667, tau_1720, 
@@ -1258,40 +1059,39 @@ def makemodel(params, data, num_gauss, accepted_params = []):
 			num_spec = len(data['misc'])
 			for spec in range(num_spec):
 				models[spec] += gaussian(mean = params[comp*(num_spec+2)], 
-					FWHM = params[comp*(num_spec+2) + 1], 
+					FWHM = 10**(params[comp*(num_spec+2) + 1]), 
 					height = params[comp*(num_spec+2) + 
 						spec + 2])(np.array(data['misc'][spec][0]))
 	elif 'Texp_spectrum' in data and data['Texp_spectrum']['1665'] != []:
 		for comp in range(int(num_gauss)): 
-			[vel, FWHM, logN1, logN2, logN3, logN4] = params[comp * 
-				num_params:(comp + 1) * num_params]
+			[vel,logFWHM,logN1,invTex_1612,invTex_1665,
+				invTex_1667]=params[comp*num_params:(comp+1)*num_params]
 			[tau_1612, tau_1665, tau_1667, tau_1720, 
-				Tex_1612, Tex_1665, Tex_1667, Tex_1720] = tauTexN(
-					logN1 = logN1, logN2 = logN2, logN3 = logN3, 
-					logN4 = logN4, fwhm = FWHM)
+				Tex_1612,Tex_1665,Tex_1667,Tex_1720]=tauTexN(logN1,
+					invTex_1612,invTex_1665,invTex_1667,logFWHM)
 			[Texp_1612, Texp_1665, Texp_1667, Texp_1720] = [
-				Texp(tau_1612, data['Tbg']['1612'], Tex_1612), 
-				Texp(tau_1665, data['Tbg']['1665'], Tex_1665), 
-				Texp(tau_1667, data['Tbg']['1667'], Tex_1667), 
-				Texp(tau_1720, data['Tbg']['1720'], Tex_1720)]
-			tau_m_1612 += gaussian(vel, FWHM, tau_1612)(np.array(vel_1612))
-			tau_m_1665 += gaussian(vel, FWHM, tau_1665)(np.array(vel_1665))
-			tau_m_1667 += gaussian(vel, FWHM, tau_1667)(np.array(vel_1667))
-			tau_m_1720 += gaussian(vel, FWHM, tau_1720)(np.array(vel_1720))
-			Texp_m_1612 += gaussian(vel, FWHM, Texp_1612)(np.array(vel_1612))
-			Texp_m_1665 += gaussian(vel, FWHM, Texp_1665)(np.array(vel_1665))
-			Texp_m_1667 += gaussian(vel, FWHM, Texp_1667)(np.array(vel_1667))
-			Texp_m_1720 += gaussian(vel, FWHM, Texp_1720)(np.array(vel_1720))
+				texp(tau_1612, data['Tbg']['1612'], Tex_1612), 
+				texp(tau_1665, data['Tbg']['1665'], Tex_1665), 
+				texp(tau_1667, data['Tbg']['1667'], Tex_1667), 
+				texp(tau_1720, data['Tbg']['1720'], Tex_1720)]
+			tau_m_1612 += gaussian(vel, 10**logFWHM, tau_1612)(np.array(vel_1612))
+			tau_m_1665 += gaussian(vel, 10**logFWHM, tau_1665)(np.array(vel_1665))
+			tau_m_1667 += gaussian(vel, 10**logFWHM, tau_1667)(np.array(vel_1667))
+			tau_m_1720 += gaussian(vel, 10**logFWHM, tau_1720)(np.array(vel_1720))
+			Texp_m_1612 += gaussian(vel, 10**logFWHM, Texp_1612)(np.array(vel_1612))
+			Texp_m_1665 += gaussian(vel, 10**logFWHM, Texp_1665)(np.array(vel_1665))
+			Texp_m_1667 += gaussian(vel, 10**logFWHM, Texp_1667)(np.array(vel_1667))
+			Texp_m_1720 += gaussian(vel, 10**logFWHM, Texp_1720)(np.array(vel_1720))
 	else:
 		for comp in range(int(num_gauss)): 
-			[vel, FWHM, tau_1612, tau_1667, tau_1720] = params[comp * 
+			[vel, logFWHM, tau_1612, tau_1667, tau_1720] = params[comp * 
 				num_params:(comp + 1) * num_params]
 			[tau_1612, tau_1665, tau_1667, tau_1720] = tau3(
 				tau_1612 = tau_1612, tau_1667 = tau_1667, tau_1720 = tau_1720)
-			tau_m_1612 += gaussian(vel, FWHM, tau_1612)(np.array(vel_1612))
-			tau_m_1665 += gaussian(vel, FWHM, tau_1665)(np.array(vel_1665))
-			tau_m_1667 += gaussian(vel, FWHM, tau_1667)(np.array(vel_1667))
-			tau_m_1720 += gaussian(vel, FWHM, tau_1720)(np.array(vel_1720))
+			tau_m_1612 += gaussian(vel, 10**logFWHM, tau_1612)(np.array(vel_1612))
+			tau_m_1665 += gaussian(vel, 10**logFWHM, tau_1665)(np.array(vel_1665))
+			tau_m_1667 += gaussian(vel, 10**logFWHM, tau_1667)(np.array(vel_1667))
+			tau_m_1720 += gaussian(vel, 10**logFWHM, tau_1720)(np.array(vel_1720))
 
 	# return models
 	if data['misc'] != None:
@@ -1301,8 +1101,7 @@ def makemodel(params, data, num_gauss, accepted_params = []):
 			Texp_m_1612, Texp_m_1665, Texp_m_1667, Texp_m_1720)	
 	else:
 		return (tau_m_1612, tau_m_1665, tau_m_1667, tau_m_1720)
-def gaussian(mean, FWHM = None, height = None, sigma = None, 
-	amp = None): 
+def gaussian(mean, FWHM, height): 
 	'''
 	Generates a gaussian profile with the given parameters. Mean must be 
 		provided, as well as FWHM or sigma, and height or amp. Must be called 
@@ -1319,14 +1118,10 @@ def gaussian(mean, FWHM = None, height = None, sigma = None,
 	Returns:
 		lambda: Value of gaussian function at 'x'
 	'''
-	if sigma == None:
-		sigma = FWHM / (2. * np.sqrt(2. * np.log(2.)))
-
-	if height == None:
-		height = amp / (sigma * np.sqrt(2.* np.pi))
-	return lambda x: height * np.exp(-((x - mean)**2.) / (2.*sigma**2.))
+	return lambda x: height * np.exp(-((x - mean)**2.) / ((FWHM**2.) / (4. * np.log(2.))))
 # sample posterior using emcee
-def sampleposterior(data, num_gauss, p0, vel_range, nwalkers, accepted = []): 
+def sampleposterior(data, num_gauss, p0, vel_range, nwalkers, seed,accepted, 
+	N_range): 
 	'''
 	Samples the posterior probability distribution.
 
@@ -1337,18 +1132,20 @@ def sampleposterior(data, num_gauss, p0, vel_range, nwalkers, accepted = []):
 		p0 - (numpy array) initial positions of all walkers.
 		vel_range (array-like): allowed velocity range
 		nwalkers (int) the number of walkers. Must be even.
-	Keyword Arguments:
-		accepted_params (array-like): parameters of any previously accepted components 
-			(i.e. from another velocity range). If 'data' contains tau and Texp 
-			spectra, these will be [mean vel(1), fwhm(1), N1(1), N2(1), N3(1), 
-			N4(1), ...(num_gauss)] for 'num_gauss' gaussian components. If 'data'
-			contains only tau spectra, these will be [mean vel(1), fwhm(1), 
-			tau_1(1), tau_2(1), tau_3(1), tau_4(1), ...(num_gauss)]. If 'misc' 
-			spectra are provided, these will be [mean vel(1), fwhm(1), h1(1), 
-			h2(1), ... hN(1), ... hN(num_gauss)] for N provided spectra and 
-			'num_gauss' gaussian components. These are included to account for the 
-			tail of a neighbouring gaussian that may influence the current 
-			velocity range.
+		accepted_params (array-like): parameters of any previously accepted 
+			components (i.e. from another velocity range). If 'data' contains 
+			tau and Texp spectra, these will be [mean vel(1), fwhm(1), N1(1), 
+			N2(1), N3(1), N4(1), ...(num_gauss)] for 'num_gauss' gaussian 
+			components. If 'data'contains only tau spectra, these will be 
+			[mean vel(1), fwhm(1), tau_1(1), tau_2(1), tau_3(1), tau_4(1), 
+			...(num_gauss)]. If 'misc' spectra are provided, these will be 
+			[mean vel(1), fwhm(1), h1(1), h2(1), ... hN(1), ... hN(num_gauss)] 
+			for N provided spectra and 'num_gauss' gaussian components. These 
+			are included to account for the tail of a neighbouring gaussian 
+			that may influence the current velocity range.
+		N_range (tuple): range of log column density expected. Values in this 
+			range will have a flat prior, the prior for values outside it will 
+			drop off exponentially.
 	Returns:
 		tuple: Two array-like: (2D array, 1D array). First is the flattened 
 			Markov chain: the positions in parameter space visited by all walkers 
@@ -1368,35 +1165,43 @@ def sampleposterior(data, num_gauss, p0, vel_range, nwalkers, accepted = []):
 	else:
 		accepted_params = [x[1] for x in accepted]
 
-	burn_iterations = 200
-	final_iterations = 100
+	burn_iterations = burn_iter
+	final_iterations = final_iter
 	
-	args = [data, vel_range, num_gauss, accepted_params]
-	sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, args = args)
-	# burn
-	[burn_run, test_result] = [0, 'Fail']
+	args = [data,vel_range,num_gauss,accepted_params,N_range]
+	a=3
+	try:
+		sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, args = args, 
+			moves = emcee.moves.StretchMove(a=a))
+	except AttributeError:
+		sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, args = args, 
+			a=a)
+	# sampler.sample(p0=p0,rstate0=1)
 
-	while burn_run <= 6 and test_result == 'Fail':
+	# burn
+	[burn_run, test_result] = [0, False]
+	while burn_run <= 4 and not test_result:
 		try:
 			sampler.reset()
-			pos, prob, state = sampler.run_mcmc(p0, burn_iterations)
+			pos, prob, state = sampler.run_mcmc(p0, burn_iterations,rstate0=seed)
 		except ValueError: # sometimes there is an error within emcee
 			print('emcee is throwing a value error for p0. Running again.')
-			# sampler.reset()
-			pos, prob, state = sampler.run_mcmc(p0, burn_iterations)
+			pos, prob, state = sampler.run_mcmc(p0, burn_iterations,rstate0=seed)
 		# test convergence
+		# with open('output/'+str(round(vel_range[0],2))+'_'+data['source_name']+'_'+str(num_gauss)+'_Burnchain_'+str(burn_run)+'.pickle','wb') as f:
+		# 	pickle.dump(np.array(sampler.chain),f)
 		(test_result, p0) = convergencetest(sampler_chain = sampler.chain, 
-			num_gauss = num_gauss, pos = pos)
-		print('Convergence test result: ' + test_result)
-		if test_result == 'Fail':
-			# plotchain(sampler.chain)
-			p0 = bestwalkers(sampler.flatchain, sampler.flatlnprobability, 
-				nwalkers)
+			num_gauss = num_gauss, seed = seed)
+		# print('Convergence_test_result: '+str(test_result))
+		# print('new_p0:')
+		# with open('output/'+str(round(vel_range[0],2))+'_'+data['source_name']+'_'+str(num_gauss)+'_p0_'+str(burn_run)+'.pickle','wb') as f:
+		# 	pickle.dump(np.array(p0),f)
 		burn_run += 1
-
 	# final run
 	sampler.reset()
-	sampler.run_mcmc(pos, final_iterations)
+	sampler.run_mcmc(pos, final_iterations,rstate0=seed)
+	# with open('output/'+str(round(vel_range[0],2))+'_'+data['source_name']+'_'+str(num_gauss)+'_Finalchain.pickle','wb') as f:
+	# 	pickle.dump(np.array(sampler.chain),f)
 	# remove steps where lnprob = -np.inf
 	flatchain = sampler.flatchain
 	flatlnprob = sampler.flatlnprobability
@@ -1405,7 +1210,7 @@ def sampleposterior(data, num_gauss, p0, vel_range, nwalkers, accepted = []):
 		if flatlnprob[x] != -np.inf]
 
 	if np.array(chain).shape[0] == 0:
-		print('No finite members of posterior')
+		print('No finite members of posterior!')
 		return (np.array([]), np.array([]))
 	else:
 		lnprob_ = [x for x in flatlnprob if x != -np.inf]
@@ -1429,12 +1234,12 @@ def plotchain(chain):
 		plt.figure()
 		for walker in range(nwalkers):
 			plt.plot(range(nstep), chain[walker,:,parameter])
-		plt.title('Chains for param ' + str(parameter) + ': burn in')
+		plt.title('Chains for param ' + str(parameter))
 		plt.xlabel('Iterations')
 		plt.ylabel('Parameter value')
 		plt.show()
 		plt.close()
-def lnprob(lnprobx, data, vel_range, num_gauss, accepted_params = []):
+def lnprob(lnprobx,data,vel_range,num_gauss,accepted_params,N_range,lfwhm_mean=None,lfwhm_sig=None):
 	'''
 	Returns the value of the posterior probability at the point in parameter 
 	space given by 'lnprobx'.
@@ -1446,29 +1251,31 @@ def lnprob(lnprobx, data, vel_range, num_gauss, accepted_params = []):
 			Main function)
 		vel_range (array-like): allowed velocity range
 		num_gauss (int): number of gaussian components
-	Keyword Arguments:
-		accepted_params (array-like): parameters of any previously accepted components 
-			(i.e. from another velocity range). If 'data' contains tau and Texp 
-			spectra, these will be [mean vel(1), fwhm(1), N1(1), N2(1), N3(1), 
-			N4(1), ...(num_gauss)] for 'num_gauss' gaussian components. If 'data'
-			contains only tau spectra, these will be [mean vel(1), fwhm(1), 
-			tau_1(1), tau_2(1), tau_3(1), tau_4(1), ...(num_gauss)]. If 'misc' 
-			spectra are provided, these will be [mean vel(1), fwhm(1), h1(1), 
-			h2(1), ... hN(1), ... hN(num_gauss)] for N provided spectra and 
-			'num_gauss' gaussian components. These are included to account for the 
-			tail of a neighbouring gaussian that may influence the current 
-			velocity range.
+		accepted_params (array-like): parameters of any previously accepted 
+			components (i.e. from another velocity range). If 'data' contains 
+			tau and Texp spectra, these will be [mean vel(1), fwhm(1), N1(1), 
+			N2(1), N3(1), N4(1), ...(num_gauss)] for 'num_gauss' gaussian 
+			components. If 'data'contains only tau spectra, these will be 
+			[mean vel(1), fwhm(1), tau_1(1), tau_2(1), tau_3(1), tau_4(1), 
+			...(num_gauss)]. If 'misc' spectra are provided, these will be 
+			[mean vel(1), fwhm(1), h1(1), h2(1), ... hN(1), ... hN(num_gauss)] 
+			for N provided spectra and 'num_gauss' gaussian components. These 
+			are included to account for the tail of a neighbouring gaussian 
+			that may influence the current velocity range.
+		N_range (tuple): range of log column density expected. Values in this 
+			range will have a flat prior, the prior for values outside it will 
+			drop off exponentially.
 	Returns:
 		float: natural log of the posterior probability distribution at a the 
 		sampled point in parameter space.
 	'''
-	prior = lnprprior(data, lnprobx, vel_range, num_gauss)
+	prior = lnprprior(data,lnprobx,vel_range,num_gauss,N_range,lfwhm_mean,lfwhm_sig)
 	params = lnprobx
 	models = makemodel(params, data, num_gauss, accepted_params)
-	if data['misc'] != None:
-		spectra = [x[1] for x in data['misc']]
-		rms = [findrms(x) for x in spectra]
-	elif 'Texp_spectrum' in data and data['Texp_spectrum']['1665'] != []:
+	# if data['misc'] != None:
+	# 	spectra = [x[1] for x in data['misc']]
+	# 	rms = [findrms(x) for x in spectra]
+	if 'Texp_spectrum' in data and data['Texp_spectrum']['1665'] != []:
 		[tau_m_1612, tau_m_1665, tau_m_1667, tau_m_1720, Texp_m_1612, 
 		Texp_m_1665, Texp_m_1667, Texp_m_1720] = models
 		spectra = [	data['tau_spectrum']['1612'], 
@@ -1498,16 +1305,121 @@ def lnprob(lnprobx, data, vel_range, num_gauss, accepted_params = []):
 					data['tau_rms']['1667'], 
 					data['tau_rms']['1720']]
 	lprob = prior 
+	if np.isnan(lprob):
+		# print('prob=0 because prior = 0')
+		return -np.inf
 	for a in range(len(spectra)):
 		llh = lnlikelihood(models[a], spectra[a], rms[a])
-		# print('prior: ' + str(prior) + '\tlikelihood: ' + str(llh))
 		lprob += llh
 	if np.isnan(lprob):
-		# print('lnprob wanted to return NaN for parameters: ' + str(lnprobx))
+		# print('prob=0 because likelihood = 0')
 		return -np.inf
 	else:
 		return lprob	
-def lnprprior(data, params, vel_range, num_gauss): 
+def convergencetest(sampler_chain, num_gauss,seed): 
+	'''
+	Tests the convergence of a Markov chain. If the chain has not converged, 
+	will replace the last position of the walkers with a 'better' position 
+	in parameter space.
+
+	Parameters:
+		sampler_chain (array-like): 3D array (i.e. not flattened) of Markov 
+			chain. Dimensions: [number of walkers, number of iterations, 
+			number of parameters].
+		num_gauss (int): number of gaussian components
+		pos (array-like): final position in parameter space
+	Returns:
+		tuple: Tuple with two elements: first is a boolean, second is the 
+		position in parameter space from which each walker will continue.
+	'''
+
+	nwal = sampler_chain.shape[0]
+	nitr = sampler_chain.shape[1]
+	ndim = sampler_chain.shape[2]
+	if nitr>100:
+		sampler_chain=sampler_chain[:,-100:,:]
+		nitr=100
+
+	pass_fail = True
+
+	flat_chain=sampler_chain.reshape((int(nitr*nwal),ndim))
+	bin_ranges=[]
+	for parameter in range(ndim):
+		passing_walkers=[]
+		pos=[x[parameter] for x in flat_chain]
+		(density,param_value)=np.histogram(pos,bins=500,density=True)
+		dparam=param_value[1]-param_value[0]
+		max_density_ind=np.argmax(density)
+		center_param_value=param_value[max_density_ind]+dparam/2
+		param_range=[center_param_value-abs(dparam/2),
+			center_param_value+abs(dparam/2)]
+		if bin_ranges == []:
+			bin_ranges=[param_range]
+		else:
+			bin_ranges+=[param_range]
+
+		if pass_fail:
+			# Check variances
+			pass_fail=checkvariances(sampler_chain,0.3)
+			if pass_fail:
+				for walker in range(nwal):
+					walker_path=sampler_chain[walker,:,parameter]
+					above=int((walker_path>=param_range[0]).sum())
+					below=int((walker_path<=param_range[1]).sum())
+					if above != 0 and below != 0:
+						if len(passing_walkers)==0:
+							passing_walkers=[walker]
+						else:
+							passing_walkers+=[walker]
+				if len(passing_walkers)/nwal < 0.9:
+					pass_fail = False
+
+	if pass_fail:
+		return (True, sampler_chain[:,-1,:])
+	else:
+		# print('Convergence test failed')
+
+		# change order of bin_ranges so they're in ascending order of v
+		npar=int(ndim/num_gauss)
+		vel_ranges=bin_ranges[::npar]
+		vel_mins=[x[0] for x in vel_ranges]
+		bin_ranges_old=bin_ranges
+		a=0
+		for g in np.argsort(vel_mins):
+			bin_ranges[int(a):int(a+npar)]=bin_ranges_old[int(g*npar):int(
+				g*npar+npar)]
+			a+=npar
+		if seed != None:
+			np.random.seed(seed=seed)
+		new_p0=np.array([np.random.uniform(bin_ranges[x][0],bin_ranges[x][1],
+			nwal) for x in range(ndim)])
+		new_p0=new_p0.transpose()
+		return (False, new_p0)
+def checkvariances(chain, tolerance):
+	if tolerance<=0 or tolerance>1:
+		print('Checkvariances requires a tolerance in the range (0,1].')
+		return None
+	nwal = chain.shape[0]
+	nitr = chain.shape[1]
+	ndim = chain.shape[2]
+	if nitr>100:
+		chain=chain[:,-100:,:]
+		nitr=100
+	for dim in range(ndim):	
+		var_by_step=np.zeros(nitr)
+		var_by_walk=np.zeros(nwal)
+		dim_ar=chain[:,:,dim]
+		for walk in range(nwal):
+			var_by_walk[walk]=np.var(dim_ar[walk])
+		for step in range(nitr):
+			var_by_step[step]=np.var(dim_ar[:,step])
+		av_step=np.mean(var_by_step)
+		av_walk=np.mean(var_by_walk)
+		if (np.min([av_step,av_walk])/np.max([av_step,av_walk]))<tolerance:
+			return False
+	return True
+# priors
+def lnprprior(data,params,vel_range,num_gauss,N_range,lfwhm_mean=None,lfwhm_sig=None):
 	'''
 	Returns the value of the pprior probability at the point in parameter 
 	space given by 'params'.
@@ -1518,162 +1430,140 @@ def lnprprior(data, params, vel_range, num_gauss):
 		params (array-like): 1D position vector in parameter space
 		vel_range (array-like): allowed velocity range
 		num_gauss (int): number of gaussian components
+		N_range (tuple): range of log column density expected. Values in this 
+			range will have a flat prior, the prior for values outside it will 
+			drop off exponentially.
 	Returns:
-		float: natural log of the prior probability distribution at a the sampled 
-		point in parameter space.
+		float: natural log of the prior probability distribution at the 
+		sampled point in parameter space.
 	'''
-	lnprprior = 0
-	if data['misc'] != None:
-		vel_prev = vel_range[0]
-		num_params = len(data['misc']) + 2
-		for gauss in range(num_gauss):
-			lnprprior += lnnaiveprior(value = params[int(gauss*num_params)], 
-				value_range = [vel_prev, vel_range[1]])
-			lnprprior += fwhmlnprior(params[int(gauss*num_params)+1])
-			for spec in range(len(data['misc'])):
-				lnprprior += lnnaiveprior(
-					value = params[int(gauss*num_params+spec+2)], 
-					value_range = [-1.5*np.abs(
-						np.min(data['misc'][spec][1])),
-					1.5*np.abs(np.max(data['misc'][spec][1]))])
-	else:
+	# velocity prior
+	vr=(vel_range[1]-vel_range[0])
+	[v0,v1]=[vel_range[0]+0.05*vr,vel_range[1]-0.05*vr]
+	lnprprior = np.log(np.math.factorial(num_gauss)/((v1-
+			v0)**num_gauss))
+	# if data['misc'] != None:
+	# 	vel_prev = vel_range[0]
+	# 	num_params = len(data['misc']) + 2
+	# 	for gauss in range(num_gauss):
+	# 		if (params[int(gauss*num_params)] > vel_range[1] or 
+	# 			params[int(gauss*num_params)] < vel_prev):
+	# 			# print('prob=0 because velocities out of order')
+	# 			return -np.inf
+	# 		lnprprior += logfwhmlnprior(params[int(gauss*num_params)+1],lfwhm_mean,lfwhm_sig)
+	# 		for spec in range(len(data['misc'])):
+	# 			lnprprior += lnnaiveprior(
+	# 				value = params[int(gauss*num_params+spec+2)], 
+	# 				value_range = [-1.5*np.abs(
+	# 					np.min(data['misc'][spec][1])),
+	# 				1.5*np.abs(np.max(data['misc'][spec][1]))])
+	# 		vel_prev=params[int(gauss*num_params)]
+	# else:
+	vel_prev = vel_range[0]
+	for gauss in range(num_gauss):
+		# define params
 		if 'Texp_spectrum' in data and data['Texp_spectrum']['1665'] != []:
-			[logN1_range, logN2_range, 
-				logN3_range, logN4_range] = data['N_ranges']
-		vel_prev = vel_range[0]
-		for gauss in range(num_gauss):
-			# define params
-			if 'Texp_spectrum' in data and data['Texp_spectrum']['1665'] != []:
-				[vel, FWHM, logN1, logN2, logN3, 
-					logN4] = params[int(gauss * 6):int((gauss + 1) * 6)]
-				[tau_1612, tau_1665, tau_1667, tau_1720, Tex_1612, Tex_1665, 
-					Tex_1667, Tex_1720] = tauTexN(logN1, logN2, logN3, 
-						logN4, FWHM)
-			else:
-				[vel, FWHM, tau_1612, tau_1667, 
-					tau_1720] = params[int(gauss * 5):int((gauss + 1) * 5)]
-				[tau_1612, tau_1665, tau_1667, 
-					tau_1720] = tau3(tau_1612 = tau_1612, 
-							tau_1667 = tau_1667, 
-							tau_1720 = tau_1720)
-			# calculate priors
-			vel_prior = lnnaiveprior(value = vel, 
-				value_range = [vel_prev, vel_range[1]])
-			FWHM_prior = fwhmlnprior(FWHM)
-			if 'Texp_spectrum' in data and data['Texp_spectrum']['1665'] != []:
-				logN1_prior = lnnaiveprior(value = logN1, 
-					value_range = logN1_range)
-				logN2_prior = lnnaiveprior(value = logN2, 
-					value_range = logN2_range)
-				logN3_prior = lnnaiveprior(value = logN3, 
-					value_range = logN3_range)
-				logN4_prior = lnnaiveprior(value = logN4, 
-					value_range = logN4_range)
-				lnprprior += np.sum([vel_prior,FWHM_prior,logN1_prior,
-					logN2_prior,logN3_prior,logN4_prior])				
-			else:
-				(tau_1612_range, tau_1665_range, 
-					tau_1667_range, tau_1720_range) = (
-					[-2 * np.abs(np.amin(data['tau_spectrum']['1612'])), 
-					2 * np.abs(np.amax(data['tau_spectrum']['1612']))], 
-					[-1.5 * np.abs(np.amin(data['tau_spectrum']['1665'])), 
-					1.5 * np.abs(np.amax(data['tau_spectrum']['1665']))], 
-					[-1.5 * np.abs(np.amin(data['tau_spectrum']['1667'])), 
-					1.5 * np.abs(np.amax(data['tau_spectrum']['1667']))], 
-					[-2 * np.abs(np.amin(data['tau_spectrum']['1720'])), 
-					2 * np.abs(np.amax(data['tau_spectrum']['1720']))])
-				tau_1612_prior = lnnaiveprior(value = tau_1612, 
-					value_range = tau_1612_range)
-				tau_1665_prior = lnnaiveprior(value = tau_1665, 
-					value_range = tau_1665_range)
-				tau_1667_prior = lnnaiveprior(value = tau_1667, 
-					value_range = tau_1667_range)
-				tau_1720_prior = lnnaiveprior(value = tau_1720, 
-					value_range = tau_1720_range)
-				lnprprior += np.sum([vel_prior,FWHM_prior,tau_1612_prior,
-					tau_1665_prior,tau_1667_prior,tau_1720_prior])
+			[vel,logFWHM,logN1,invTex_1612,invTex_1665,
+				invTex_1667] = params[int(gauss * 6):int((gauss + 1) * 6)]
+			[tau_1612, tau_1665, tau_1667, tau_1720, Tex_1612, Tex_1665, 
+				Tex_1667, Tex_1720] = tauTexN(logN1,invTex_1612,invTex_1665,
+				invTex_1667,logFWHM)
+
+		else:
+			[vel, logFWHM, tau_1612, tau_1667, 
+				tau_1720] = params[int(gauss * 5):int((gauss + 1) * 5)]
+			[tau_1612, tau_1665, tau_1667, 
+				tau_1720] = tau3(tau_1612 = tau_1612, 
+						tau_1667 = tau_1667, 
+						tau_1720 = tau_1720)
+		if (vel > vel_range[1] or vel < vel_prev):
+			# print('prob=0 because velocities out of order')
+			return -np.inf
+		vel_prev=vel		
+		# calculate priors
+		logFWHM_prior = logfwhmlnprior(logFWHM,lfwhm_mean,lfwhm_sig)
+		if 'Texp_spectrum' in data and data['Texp_spectrum']['1665'] != []:
+			# N prior
+			logN1_prior = lnNprior(logN1,N_range)
+			# inv Tex priors
+			invTex_prior=lninvTexprior(invTex_1612,invTex_1665,invTex_1667)
+			lnprprior += np.sum([logFWHM_prior,logN1_prior,invTex_prior])				
+		else:
+			(tau_1612_range, tau_1665_range, 
+				tau_1667_range, tau_1720_range) = (
+				[-2 * np.abs(np.amin(data['tau_spectrum']['1612'])), 
+				2 * np.abs(np.amax(data['tau_spectrum']['1612']))], 
+				[-1.5 * np.abs(np.amin(data['tau_spectrum']['1665'])), 
+				1.5 * np.abs(np.amax(data['tau_spectrum']['1665']))], 
+				[-1.5 * np.abs(np.amin(data['tau_spectrum']['1667'])), 
+				1.5 * np.abs(np.amax(data['tau_spectrum']['1667']))], 
+				[-2 * np.abs(np.amin(data['tau_spectrum']['1720'])), 
+				2 * np.abs(np.amax(data['tau_spectrum']['1720']))])
+			tau_1612_prior = lnnaiveprior(tau_1612,tau_1612_range)
+			tau_1665_prior = lnnaiveprior(tau_1665,tau_1665_range)
+			tau_1667_prior = lnnaiveprior(tau_1667,tau_1667_range)
+			tau_1720_prior = lnnaiveprior(tau_1720,tau_1720_range)
+			lnprprior += np.sum([logFWHM_prior,tau_1612_prior,
+				tau_1665_prior,tau_1667_prior,tau_1720_prior])
 	return lnprprior
-def convergencetest(sampler_chain, num_gauss, pos): 
+def lninvTexprior(invTex_1612,invTex_1665,invTex_1667):
 	'''
-	Tests the convergence of a Markov chain. If the chain has not converged, 
-	will replace the last position of the walkers with a 'better' position 
-	in parameter space.
-
-	Parameters:
-		sampler_chain (array-like): 3D array (i.e. not flattened) of Markov chain.
-			Dimensions: [number of walkers, number of iterations, number of 
-			parameters].
-		num_gauss (int): number of gaussian components
-		pos (array-like): final position in parameter space
-	Returns:
-		tuple: Tuple with two elements: first the string 'Pass' or 'Fail', second 
-		the position in parameter space for each walker to continue from.
-
+	Priors for inverse excitation temperature are based on modelling of OH 
+	excitation temperatures with cloud parameters in the ranges:
+		logTgas=1-2
+		logNOH=11-17
+		fortho=0.75
+		FWHM=np.random.beta(7,8)
+		Av=[0.1,0.3,1]
+		logxOH=-7
+		logxHe=np.log10(0.2)
+		logTdint=1-np.log10(30)
+		logTd=1-2
+		lognH2=[2,3,4,5]
+		logxe=[-4,-5,-7,-7.5]
 	'''
-	model_dim = int(sampler_chain.shape[2] / num_gauss)
-	orig_num_walkers = sampler_chain.shape[0]
-	counter = 0
-
-	# remove dead walkers
-	for walker in reversed(range(sampler_chain.shape[0])):
-		if sampler_chain[walker,0,0] == sampler_chain[walker,-1,0]:
-			sampler_chain = np.delete(sampler_chain, walker, 0)
-			counter += 1
-	# replace removed walkers
-	if counter > 0 and counter < orig_num_walkers / 2:
-		for x in range(counter):
-			sampler_chain = np.concatenate((sampler_chain, [sampler_chain[0]]), 
-				axis = 0)
-	elif counter >= orig_num_walkers / 2:
-		print('Convergence test failed due to too many dead walkers')
-		return ('Fail', pos)
-
-	# test convergence in velocity
-	for comp in range(num_gauss):
-
-		var_within_chains = np.median([np.var(sampler_chain[x,-25:-1,
-			comp * model_dim]) for x in range(sampler_chain.shape[0])])
-		var_across_chains = np.median([np.var(sampler_chain[:,-x-1,
-			comp * model_dim]) for x in range(24)])
-		ratio = (max([var_within_chains, var_across_chains]) / 
-			min([var_within_chains, var_across_chains]))
-		max_var = max([var_within_chains, var_across_chains])
-
-		if ratio > 5. and max_var < 1.:
-			print('Convergence test failed due to component number ' + 
-				str(comp+1) + ' with variance ratio = ' + 
-				str(round(ratio, 2)) + ' and max variance = ' + 
-				str(round(max_var, 2)))
-			return ('Fail', sampler_chain[:,-1,:])
-
-	return ('Pass', sampler_chain[:,-1,:])
-def bestwalkers(flatchain, flatlnprob, nwalkers):
-	'''
-	Returns 'improved' initial positions for walkers based on a previous 
-	Markov chain.
-
-	Parameters:
-		flatchain (array-like): flattened (2D) Markov chain
-		flatlnprob (array-like): flattened (1D) log probability chain
-		nwalkers (int): number of walkers
-	Returns:
-		array-like: (2D) positions of nwalkers in parameter space
-	'''
-	flatchain = np.array(flatchain)
-	flatlnprob = np.array(flatlnprob)
+	def gaussvalue(x,params):
+		[mean,fwhm,height]=params
+		return height*np.exp(-((x-mean)**2.)/((fwhm**2.)/(4.*np.log(2.))))
 	
-	inds = (-flatlnprob).argsort()
-	sorted_chain = flatchain[inds]
+	[prob_1612, prob_1665, prob_1667] = [0,0,0]
 
-	if len(sorted_chain) >= nwalkers:
-		p0 = sorted_chain[0:nwalkers]
-	else:
-		needed = nwalkers - len(sorted_chain)
-		new_raw = np.random.choice(sorted_chain, needed, replace = False)
-		new = [[x*(0.01*(np.random.randn()) + 1) for x in y] for y in new_raw]
-		p0 = np.concatenate((sorted_chain, new), axis = 0)
-	return p0
-# priors
+	param_1612=[[0.084480812,0.074334709,3.572859019],
+			[0.233364136,0.414556078,0.673532308],
+			[0.619677353,1.425978468,0.272501352],
+			[-0.069920697,0.030978227,0.334400108]]
+	param_1665=[[0.053621624,0.018592859,10.28036707],
+			[0.094736144,0.029160044,6.464982765],
+			[0.188202112,0.325484875,1.719827397]]
+	param_1667=[[0.057751275,0.019899008,8.902276147],
+			[0.10049005,0.011613108,10.13455302],
+			[0.124107907,0.150702421,1.576622393],
+			[0.352338039,0.473323103,0.85987]]
+	# 1612
+	for comp in param_1612:
+		prob_1612+=gaussvalue(invTex_1612,comp)
+	# 1665
+	for comp in param_1665:
+		prob_1665+=gaussvalue(invTex_1665,comp)
+	# 1667
+	for comp in param_1667:
+		prob_1667+=gaussvalue(invTex_1667,comp)
+	return np.log(prob_1612)+np.log(prob_1665)+np.log(prob_1667)
+# @jit
+def lnNprior(logN1,N_range):
+	'''
+	This distribution is based on data from Li et al. 2018 where mean 
+	logN~13.3.
+		N_range (tuple): range of log column density expected. Values in this 
+			range will have a flat prior, the prior for values outside it will 
+			drop off exponentially.
+	'''
+	mean=13.2
+	sigma=1
+	if (logN1>N_range[0]).all() and (logN1<N_range[1]).all():
+		return np.log((1/(sigma*np.sqrt(2*np.pi)))*np.exp(-((logN1-mean)**2)/(2*sigma**2)))
+	return -np.inf
+# @jit
 def lnnaiveprior(value, value_range): 
 	'''
 	Calculates the natural log of a naive (flat) prior for the given value 
@@ -1686,26 +1576,38 @@ def lnnaiveprior(value, value_range):
 		float: natural log of the prior probability distribution for this 
 			parameter
 	'''
-	if value >= value_range[0] and value <= value_range[1]:
-		return -np.log(np.abs(value_range[1] - value_range[0]))
+	sigma=(value_range[1]-value_range[0])/20
+	h=1/(sigma*np.sqrt(2*np.pi)+value_range[1]-value_range[0])
+	if value < value_range[0]:
+		return np.log(h*np.exp(-((value-value_range[0])**2)/(2*sigma**2)))
+	elif value > value_range[1]:
+		return np.log(h*np.exp(-((value-value_range[1])**2)/(2*sigma**2)))
 	else:
-		return -np.inf
-def fwhmlnprior(fwhm,a=7,b=8,B=4.16250416e-5):
+		return np.log(h)
+# @jit
+def logfwhmlnprior(logfwhm,mean,sigma):
 	'''
-	Calculates natural log of prior for the value of full width at half-maximum 
-	using a beta prime distribution. Default values approximates the 
-	distribution of fwhm found in GNOMES and Millenium Survey.
-	The form of a beta prime distribution: f(x) = x^(a-1) * (1+x)^(-a-b) / B
+	Calculates natural log of prior for the log value of full width at 
+	half-maximum using a Gaussian distribution. Default values approximates 
+	the distribution of fwhm found in GNOMES and Millenium Survey.
 
 	Parameters:
-		fwhm (float): value of fwhm (km/s)
+		logfwhm (float): value of log fwhm (km/s)
 	Keyword Arguments:
-		a (float)
-		b (float)
-		B (float)
+		mean (float)
+		sigma (float)
 	Returns:
 		float: natural log of prior probability distribution at fwhm
 	'''
-	prior = (fwhm**(a-1)) * ((1+fwhm)**(-a-b)) / B
+	if mean==None:
+		mean=-0.18
+	if sigma==None:
+		sigma=0.23
+	prior = (1/(sigma*np.sqrt(2*np.pi)))*np.exp(-((logfwhm-mean)**2)/(2*sigma**2))
 	return np.log(prior)
+
+
+
+
+
 
